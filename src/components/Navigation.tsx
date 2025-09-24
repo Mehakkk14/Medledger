@@ -1,0 +1,238 @@
+import React, { useState } from "react";
+import { Link, useLocation } from "react-router-dom";
+import { GlassCard } from "@/components/ui/glass-card";
+import { GradientButton } from "@/components/ui/gradient-button";
+
+import { useAuth } from "@/hooks/useAuth";
+import { 
+  Search, 
+  Bell, 
+  User, 
+  Menu, 
+  X,
+  Shield,
+  Upload,
+  Search as SearchIcon
+} from "lucide-react";
+
+const Navigation = () => {
+  
+  const { isAuthenticated, user, logout } = useAuth();
+  const location = useLocation();
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+
+  const handleSearch = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (searchQuery.trim()) {
+      window.location.href = `/verify?id=${encodeURIComponent(searchQuery.trim())}`;
+    }
+  };
+
+  const navLinks = [
+    { href: "/", label: "Home" },
+    { href: "/upload", label: "Upload" },
+    { href: "/verify", label: "Verify" },
+    { href: "/dashboard", label: "Dashboard" },
+    { href: "/pricing", label: "Pricing" },
+    { href: "/about", label: "About" },
+  ];
+
+  const isActivePath = (path: string) => location.pathname === path;
+
+  return (
+    <>
+      {/* Desktop Navigation */}
+      <nav className="nav-glass fixed top-0 left-0 right-0 z-50 backdrop-blur-xl border-b border-white/10">
+        <div className="container mx-auto px-4">
+          <div className="flex items-center justify-between h-16">
+            {/* Logo */}
+            <Link to="/" className="flex items-center space-x-2">
+              <img src="/lovable-uploads/6f82c18b-8fad-448c-9f98-c223d3190609.png" alt="MedLedger" className="w-8 h-8" />
+              <span className="text-xl font-bold bg-gradient-primary bg-clip-text text-transparent">
+                MedLedger
+              </span>
+            </Link>
+
+            {/* Desktop Navigation Links */}
+            <div className="hidden lg:flex items-center space-x-1">
+              {navLinks.map((link) => (
+                <Link
+                  key={link.href}
+                  to={link.href}
+                  className={`px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
+                    isActivePath(link.href)
+                      ? "text-primary-neon bg-primary-neon/10"
+                      : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
+                  }`}
+                >
+                  {link.label}
+                </Link>
+              ))}
+            </div>
+
+            {/* Right side actions */}
+            <div className="flex items-center space-x-4">
+              {/* Search */}
+              <div className="hidden md:flex items-center">
+                <form onSubmit={handleSearch} className="relative">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
+                  <input
+                    type="text"
+                    placeholder="Search records..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="input-glass pl-10 pr-4 py-2 w-64 text-sm"
+                  />
+                </form>
+              </div>
+
+
+              {/* Notifications */}
+              <button className="p-2 rounded-lg glass hover:bg-accent/50 transition-colors relative">
+                <Bell className="w-5 h-5 text-muted-foreground" />
+                <span className="absolute -top-1 -right-1 w-3 h-3 bg-danger rounded-full"></span>
+              </button>
+
+              {/* Auth Buttons / User Menu */}
+              {isAuthenticated ? (
+                <div className="flex items-center space-x-2">
+                  <div className="text-sm text-muted-foreground hidden md:block">
+                    Welcome, {user?.firstName}
+                  </div>
+                  <button 
+                    onClick={logout}
+                    className="p-2 rounded-lg glass hover:bg-accent/50 transition-colors"
+                  >
+                    <User className="w-5 h-5 text-muted-foreground" />
+                  </button>
+                </div>
+              ) : (
+                <div className="hidden md:flex items-center space-x-2">
+                  <Link to="/login">
+                    <GradientButton variant="ghost" size="sm">
+                      Login
+                    </GradientButton>
+                  </Link>
+                  <Link to="/signup">
+                    <GradientButton size="sm">
+                      Sign Up
+                    </GradientButton>
+                  </Link>
+                </div>
+              )}
+
+              {/* Mobile Menu Toggle */}
+              <button
+                className="lg:hidden p-2 rounded-lg glass hover:bg-accent/50 transition-colors"
+                onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+              >
+                {isMobileMenuOpen ? (
+                  <X className="w-5 h-5" />
+                ) : (
+                  <Menu className="w-5 h-5" />
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Mobile Menu */}
+        {isMobileMenuOpen && (
+          <div className="lg:hidden border-t border-border/30">
+            <div className="container mx-auto px-4 py-4">
+              <div className="flex flex-col space-y-2">
+                {navLinks.map((link) => (
+                  <Link
+                    key={link.href}
+                    to={link.href}
+                    className={`px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
+                      isActivePath(link.href)
+                        ? "text-primary-neon bg-primary-neon/10"
+                        : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
+                    }`}
+                    onClick={() => setIsMobileMenuOpen(false)}
+                  >
+                    {link.label}
+                  </Link>
+                ))}
+                
+                {!isAuthenticated && (
+                  <div className="pt-4 border-t border-border/30 mt-4">
+                    <div className="flex flex-col space-y-2">
+                      <Link to="/login" onClick={() => setIsMobileMenuOpen(false)}>
+                        <GradientButton variant="ghost" className="w-full">
+                          Login
+                        </GradientButton>
+                      </Link>
+                      <Link to="/signup" onClick={() => setIsMobileMenuOpen(false)}>
+                        <GradientButton className="w-full">
+                          Sign Up
+                        </GradientButton>
+                      </Link>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+      </nav>
+
+      {/* Mobile Bottom Navigation */}
+      <div className="lg:hidden fixed bottom-0 left-0 right-0 z-50">
+        <GlassCard className="rounded-t-xl rounded-b-none border-t border-border/30">
+          <div className="flex justify-around items-center py-2">
+            <Link
+              to="/"
+              className={`flex flex-col items-center p-2 rounded-lg transition-colors ${
+                isActivePath("/") ? "text-primary-neon" : "text-muted-foreground"
+              }`}
+            >
+              <Shield className="w-5 h-5" />
+              <span className="text-xs mt-1">Home</span>
+            </Link>
+            <Link
+              to="/upload"
+              className={`flex flex-col items-center p-2 rounded-lg transition-colors ${
+                isActivePath("/upload") ? "text-primary-neon" : "text-muted-foreground"
+              }`}
+            >
+              <Upload className="w-5 h-5" />
+              <span className="text-xs mt-1">Upload</span>
+            </Link>
+            <Link
+              to="/verify"
+              className={`flex flex-col items-center p-2 rounded-lg transition-colors ${
+                isActivePath("/verify") ? "text-primary-neon" : "text-muted-foreground"
+              }`}
+            >
+              <SearchIcon className="w-5 h-5" />
+              <span className="text-xs mt-1">Verify</span>
+            </Link>
+            <Link
+              to="/dashboard"
+              className={`flex flex-col items-center p-2 rounded-lg transition-colors ${
+                isActivePath("/dashboard") ? "text-primary-neon" : "text-muted-foreground"
+              }`}
+            >
+              <Bell className="w-5 h-5" />
+              <span className="text-xs mt-1">Dashboard</span>
+            </Link>
+            <Link
+              to={isAuthenticated ? "/dashboard" : "/login"}
+              className={`flex flex-col items-center p-2 rounded-lg transition-colors ${
+                isActivePath("/login") ? "text-primary-neon" : "text-muted-foreground"
+              }`}
+            >
+              <User className="w-5 h-5" />
+              <span className="text-xs mt-1">Profile</span>
+            </Link>
+          </div>
+        </GlassCard>
+      </div>
+    </>
+  );
+};
+
+export default Navigation;
