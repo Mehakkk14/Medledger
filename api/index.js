@@ -3,11 +3,25 @@ const cors = require('cors');
 const multer = require('multer');
 
 const app = express();
-app.use(cors());
+
+// Enable CORS for all origins
+app.use(cors({
+  origin: true,
+  credentials: true
+}));
+
+// Parse JSON bodies
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 // Setup multer for handling file uploads
 const upload = multer({ dest: '/tmp/uploads/' });
+
+// Add request logging
+app.use((req, res, next) => {
+  console.log(`${req.method} ${req.path}`, req.body);
+  next();
+});
 
 // In-memory storage for demo
 const hospitals = [
@@ -49,13 +63,22 @@ const records = [
 
 // Login endpoint
 app.post('/api/login', (req, res) => {
+  console.log('Login request received:', req.body);
   const { email, password } = req.body;
   console.log('Login attempt:', email, password);
   
+  if (!email || !password) {
+    return res.status(400).json({ error: 'Email and password are required' });
+  }
+  
   const hospital = hospitals.find(h => h.email === email && h.password === password);
+  console.log('Hospital found:', hospital);
+  
   if (hospital) {
+    console.log('Login successful for:', email);
     res.json({ hospitalName: hospital.hospitalName });
   } else {
+    console.log('Login failed for:', email);
     res.status(401).json({ error: 'Invalid credentials' });
   }
 });
@@ -163,7 +186,15 @@ app.post('/api/upload-record', upload.array('files'), (req, res) => {
 
 // Health check
 app.get('/api', (req, res) => {
-  res.json({ message: 'MedLedger API is running!' });
+  res.json({ 
+    message: 'MedLedger API is running!', 
+    timestamp: new Date().toISOString(),
+    endpoints: ['/api/login', '/api/register-hospital', '/api/all-records', '/api/verify-record', '/api/upload-record']
+  });
+});
+
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'OK', message: 'API is healthy' });
 });
 
 // Export for Vercel
