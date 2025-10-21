@@ -172,7 +172,7 @@ const Upload = () => {
     if (clientTxHash) body.append('clientTxHash', clientTxHash);
         uploadedFiles.forEach(f => body.append('files', f.file, f.file.name));
 
-        const res = await fetch('http://localhost:3001/upload-record', {
+        const res = await fetch('/api/upload-record', {
           method: 'POST',
           body,
         });

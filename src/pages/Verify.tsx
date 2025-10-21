@@ -45,7 +45,7 @@ const Verify = () => {
     setIsSearching(true);
     
     try {
-      const res = await fetch(`http://localhost:3001/verify-record/${searchId}`);
+      const res = await fetch(`/api/verify-record/${searchId}`);
       const data = await res.json();
       console.log("Verify response:", data);
 

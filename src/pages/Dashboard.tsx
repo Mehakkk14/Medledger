@@ -55,7 +55,7 @@ const Dashboard: React.FC = () => {
     try {
       // Get hospital name from user context, localStorage, or auth
       const hospitalName = localStorage.getItem("hospitalName"); // Example
-      const res = await fetch(`http://localhost:3001/all-records?hospitalName=${encodeURIComponent(hospitalName || "")}`);
+      const res = await fetch(`/api/all-records?hospitalName=${encodeURIComponent(hospitalName || "")}`);
       const data = await res.json();
       setRecords(
         (data.records || []).map((r: any) => ({
@@ -84,7 +84,7 @@ const Dashboard: React.FC = () => {
   // Function to verify/reject pending records
   const handleAdminAction = async (recordId: string, action: 'verify' | 'reject') => {
     try {
-      const res = await fetch('http://localhost:3001/admin-verify-record', {
+      const res = await fetch('/api/admin-verify-record', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ recordId, action })

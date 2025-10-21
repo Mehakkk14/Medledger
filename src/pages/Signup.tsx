@@ -66,7 +66,7 @@ const Signup = () => {
     }
     setIsLoading(true);
     try {
-      const res = await fetch('http://localhost:3001/register-hospital', {
+      const res = await fetch('/api/register-hospital', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
