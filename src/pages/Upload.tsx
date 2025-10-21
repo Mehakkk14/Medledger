@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { GlassCard } from "@/components/ui/glass-card";
 import { GradientButton } from "@/components/ui/gradient-button";
 import { 
@@ -36,6 +36,17 @@ const Upload = () => {
     hospitalName: "",
     note: ""
   });
+
+  // Auto-fill hospital name and generate record ID
+  useEffect(() => {
+    const hospitalName = localStorage.getItem("hospitalName");
+    const recordId = `MR${Date.now().toString().slice(-8)}`;
+    setFormData(prev => ({ 
+      ...prev, 
+      hospitalName: hospitalName || "",
+      recordId 
+    }));
+  }, []);
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -172,7 +183,7 @@ const Upload = () => {
     if (clientTxHash) body.append('clientTxHash', clientTxHash);
         uploadedFiles.forEach(f => body.append('files', f.file, f.file.name));
 
-        const res = await fetch('/api/upload-record', {
+        const res = await fetch('http://localhost:3001/upload-record', {
           method: 'POST',
           body,
         });

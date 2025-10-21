@@ -49,13 +49,31 @@ const Dashboard: React.FC = () => {
   const recordsPerPage = 8;
   const [records, setRecords] = useState<MedicalRecord[]>([]);
   const { toast } = useToast();
+  
+  // Check authentication
+  const isLoggedIn = localStorage.getItem("isLoggedIn") === "true";
+  const hospitalName = localStorage.getItem("hospitalName");
+  
+  if (!isLoggedIn) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <GlassCard className="p-8 text-center max-w-md">
+          <h2 className="text-2xl font-bold mb-4">Access Restricted</h2>
+          <p className="text-muted-foreground mb-6">Please log in to access the dashboard.</p>
+          <Button onClick={() => window.location.href = "/login"}>
+            Go to Login
+          </Button>
+        </GlassCard>
+      </div>
+    );
+  }
 
  useEffect(() => {
   const fetchAllRecords = async () => {
     try {
       // Get hospital name from user context, localStorage, or auth
       const hospitalName = localStorage.getItem("hospitalName"); // Example
-      const res = await fetch(`/api/all-records?hospitalName=${encodeURIComponent(hospitalName || "")}`);
+      const res = await fetch(`http://localhost:3001/all-records?hospitalName=${encodeURIComponent(hospitalName || "")}`);
       const data = await res.json();
       setRecords(
         (data.records || []).map((r: any) => ({
@@ -84,7 +102,7 @@ const Dashboard: React.FC = () => {
   // Function to verify/reject pending records
   const handleAdminAction = async (recordId: string, action: 'verify' | 'reject') => {
     try {
-      const res = await fetch('/api/admin-verify-record', {
+      const res = await fetch('http://localhost:3001/admin-verify-record', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ recordId, action })

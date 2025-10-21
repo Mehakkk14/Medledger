@@ -37,7 +37,7 @@ const Login = () => {
 
     try {
       // Send login request to backend
-      const res = await fetch('/api/login', {
+      const res = await fetch('http://localhost:3001/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(formData)
@@ -45,8 +45,10 @@ const Login = () => {
       const data = await res.json();
 
       if (res.ok && data.hospitalName) {
-        // Save hospital name to localStorage
+        // Save hospital name and user info to localStorage
         localStorage.setItem("hospitalName", data.hospitalName);
+        localStorage.setItem("userEmail", formData.email);
+        localStorage.setItem("isLoggedIn", "true");
 
         toast.success("Login successful! Welcome back.");
         window.location.href = "/dashboard";

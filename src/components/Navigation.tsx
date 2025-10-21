@@ -18,11 +18,25 @@ import {
 
 const Navigation = () => {
   
-  const { isAuthenticated, user, logout } = useAuth();
+  const { isAuthenticated: authContextAuthenticated, user, logout: authLogout } = useAuth();
   const [walletAddress, setWalletAddress] = useState<string | null>(null);
   const location = useLocation();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  
+  // Check localStorage for authentication
+  const isLoggedIn = localStorage.getItem("isLoggedIn") === "true";
+  const userEmail = localStorage.getItem("userEmail");
+  const hospitalName = localStorage.getItem("hospitalName");
+  const isAuthenticated = isLoggedIn && userEmail;
+  
+  const handleLogout = () => {
+    localStorage.removeItem("isLoggedIn");
+    localStorage.removeItem("userEmail");
+    localStorage.removeItem("hospitalName");
+    authLogout();
+    window.location.href = "/";
+  };
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -103,7 +117,7 @@ const Navigation = () => {
                     Welcome, {user?.firstName}
                   </div>
                   <button 
-                    onClick={logout}
+                    onClick={handleLogout}
                     className="p-2 rounded-lg glass hover:bg-accent/50 transition-colors"
                   >
                     <User className="w-5 h-5 text-muted-foreground" />

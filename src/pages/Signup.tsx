@@ -66,7 +66,7 @@ const Signup = () => {
     }
     setIsLoading(true);
     try {
-      const res = await fetch('/api/register-hospital', {
+      const res = await fetch('http://localhost:3001/register-hospital', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -82,8 +82,11 @@ const Signup = () => {
       });
       const data = await res.json();
       if (res.ok) {
-        toast.success("Account created successfully! Please check your email to verify your account.");
-        window.location.href = "/login";
+        toast.success("Account created successfully! You can now log in.");
+        // Auto-login after successful signup
+        setTimeout(() => {
+          window.location.href = "/login";
+        }, 1000);
       } else {
         toast.error(data.error || "Failed to create account. Please try again.");
       }
