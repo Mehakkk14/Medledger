@@ -10,6 +10,8 @@ import {
   Loader2
 } from "lucide-react";
 import { toast } from "sonner";
+import { storeHashOnChain, connectWallet } from '@/services/blockchainService';
+import { sha256 } from 'js-sha256';
 
 interface FormData {
   patientName: string;
@@ -128,46 +130,68 @@ const Upload = () => {
 
     setIsSubmitting(true);
     
-    try {
-  // Prepare form data for backend
-  const payload = {
-    patientName: formData.patientName,
-    patientContact: formData.patientContact,
-    aadhaarNumber: formData.aadhaarNumber,
-    recordId: formData.recordId,
-    hospitalName: formData.hospitalName,
-    note: formData.note,
-    files: uploadedFiles.map(f => ({
-      name: f.file.name,
-      type: f.file.type,
-      size: f.file.size
-      // You can add file upload logic here if you want to send file content
-    }))
-  };
+      try {
+        // compute combined client-side hash (sha256)
+        const combined = await (async () => {
+          const buffers = await Promise.all(uploadedFiles.map(f => f.file.arrayBuffer()));
+          const concat = buffers.reduce((acc, cur) => {
+            const tmp = new Uint8Array(acc.byteLength + cur.byteLength);
+            tmp.set(new Uint8Array(acc), 0);
+            tmp.set(new Uint8Array(cur), acc.byteLength);
+            return tmp.buffer as ArrayBuffer;
+          }, new ArrayBuffer(0));
+          return '0x' + sha256(new Uint8Array(concat));
+        })();
 
-  const res = await fetch('http://localhost:3001/log-action', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      action: 'upload-record',
-      details: payload
-    })
-  });
+        // Optionally push to chain via MetaMask if available and configured
+        let clientTxHash: string | undefined = undefined;
+        try {
+          const addr = await connectWallet();
+          if (addr) {
+            // call the contract using signer
+            try {
+              const tx = await storeHashOnChain(combined, undefined, undefined);
+              clientTxHash = tx;
+            } catch (err) {
+              console.warn('Client-side storeHash failed or not configured', err);
+            }
+          }
+        } catch (e) {
+          // ignore wallet connect errors
+        }
 
-  const data = await res.json();
+        // Build multipart form data
+        const body = new FormData();
+        body.append('patientName', formData.patientName);
+        body.append('patientContact', formData.patientContact);
+        body.append('aadhaarNumber', formData.aadhaarNumber);
+        body.append('recordId', formData.recordId);
+        body.append('hospitalName', formData.hospitalName);
+        body.append('note', formData.note);
+    body.append('clientFileHash', combined);
+    if (clientTxHash) body.append('clientTxHash', clientTxHash);
+        uploadedFiles.forEach(f => body.append('files', f.file, f.file.name));
 
-  if (res.ok) {
-    setTxHash(data.txHash || '0x' + Math.random().toString(16).slice(2).padEnd(64, '0'));
-    setIsSuccess(true);
-    toast.success("Medical record uploaded successfully!");
-  } else {
-    toast.error(data.error || "Failed to upload record. Please try again.");
-  }
-} catch (error) {
-  toast.error("Failed to upload record. Please try again.");
-} finally {
-      setIsSubmitting(false);
-    }
+        const res = await fetch('http://localhost:3001/upload-record', {
+          method: 'POST',
+          body,
+        });
+
+        const data = await res.json();
+
+        if (res.ok) {
+          setTxHash(data.txHash || '0x' + Math.random().toString(16).slice(2).padEnd(64, '0'));
+          setIsSuccess(true);
+          toast.success("Medical record uploaded successfully!");
+        } else {
+          toast.error(data.error || "Failed to upload record. Please try again.");
+        }
+      } catch (error) {
+        console.error(error);
+        toast.error("Failed to upload record. Please try again.");
+      } finally {
+        setIsSubmitting(false);
+      }
   };
 
   const resetForm = () => {

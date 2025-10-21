@@ -16,6 +16,7 @@ import {
   Hash
 } from "lucide-react";
 import { toast } from "sonner";
+import { isHashStoredOnChain } from '@/services/blockchainService';
 
 interface VerificationResult {
   recordId: string;
@@ -32,6 +33,7 @@ const Verify = () => {
   const [searchId, setSearchId] = useState("");
   const [isSearching, setIsSearching] = useState(false);
   const [result, setResult] = useState<VerificationResult | null>(null);
+  const [onChainVerified, setOnChainVerified] = useState<boolean | null>(null);
   const [searchHistory, setSearchHistory] = useState<string[]>([]);
 
   const handleSearch = async () => {
@@ -50,6 +52,13 @@ const Verify = () => {
       if (res.ok && data) {
         if (data.record) {
           setResult(data.record);
+            // check on chain if fileHash present
+            if (data.record.fileHash) {
+              const stored = await isHashStoredOnChain(data.record.fileHash, (window as any).REACT_APP_CONTRACT_ADDRESS, (window as any).REACT_APP_CONTRACT_ABI ? JSON.parse((window as any).REACT_APP_CONTRACT_ABI) : undefined);
+              setOnChainVerified(stored);
+            } else {
+              setOnChainVerified(false);
+            }
         } else if (Object.keys(data).length > 0) {
           setResult(data as VerificationResult);
         } else {
@@ -72,6 +81,18 @@ const Verify = () => {
       setIsSearching(false);
     }
   };
+
+  // If navigated with ?id=..., prefill and auto-run
+  React.useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const id = params.get('id');
+    if (id) {
+      setSearchId(id);
+      // slight delay to ensure UI updates
+      setTimeout(() => { handleSearch(); }, 200);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const copyToClipboard = (text: string, label: string) => {
     navigator.clipboard.writeText(text);
@@ -218,6 +239,11 @@ const Verify = () => {
                 <div className="text-sm text-muted-foreground">
                   Verified in {result?.verificationTime ?? ""}
                 </div>
+                {onChainVerified !== null && (
+                  <div className="text-sm mt-2">
+                    On-chain verification: {onChainVerified ? <span className="text-success">Found</span> : <span className="text-danger">Not found</span>}
+                  </div>
+                )}
               </div>
 
               {/* Record Details */}

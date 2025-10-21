@@ -4,6 +4,7 @@ import { GlassCard } from "@/components/ui/glass-card";
 import { GradientButton } from "@/components/ui/gradient-button";
 
 import { useAuth } from "@/hooks/useAuth";
+import { connectWallet } from "@/services/blockchainService";
 import { 
   Search, 
   Bell, 
@@ -18,6 +19,7 @@ import {
 const Navigation = () => {
   
   const { isAuthenticated, user, logout } = useAuth();
+  const [walletAddress, setWalletAddress] = useState<string | null>(null);
   const location = useLocation();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -119,6 +121,12 @@ const Navigation = () => {
                       Sign Up
                     </GradientButton>
                   </Link>
+                  <GradientButton variant="outline" size="sm" onClick={async () => {
+                    const addr = await connectWallet();
+                    if (addr) setWalletAddress(addr);
+                  }}>
+                    {walletAddress ? `${walletAddress.slice(0,6)}...${walletAddress.slice(-4)}` : 'Connect Wallet'}
+                  </GradientButton>
                 </div>
               )}
 

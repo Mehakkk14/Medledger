@@ -12,7 +12,10 @@ import {
   Download,
   Search,
   ChevronLeft,
-  ChevronRight 
+  ChevronRight,
+  CheckCircle,
+  XCircle,
+  AlertCircle
 } from "lucide-react";
 import { 
   Area, 
@@ -26,6 +29,7 @@ import {
   CartesianGrid, 
   Tooltip 
 } from "recharts";
+import { useToast } from "@/components/ui/use-toast";
 
 interface MedicalRecord {
   id: string;
@@ -44,28 +48,74 @@ const Dashboard: React.FC = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const recordsPerPage = 8;
   const [records, setRecords] = useState<MedicalRecord[]>([]);
+  const { toast } = useToast();
 
  useEffect(() => {
-  const fetchVerifiedRecords = async () => {
-    // Get hospital name from user context, localStorage, or auth
-    const hospitalName = localStorage.getItem("hospitalName"); // Example
-    const res = await fetch(`http://localhost:3001/verified-records?hospitalName=${encodeURIComponent(hospitalName || "")}`);
-    const data = await res.json();
-    setRecords(
-      (data.records || []).map((r: any) => ({
-        id: r.recordId,
-        patientName: r.patientName,
-        hospitalName: r.hospitalName,
-        status: r.status,
-        fileType: r.fileType || "N/A",
-        size: r.size || "N/A",
-        uploadDate: r.uploadedAt || "",
-        verificationDate: r.verificationDate || ""
-      }))
-    );
+  const fetchAllRecords = async () => {
+    try {
+      // Get hospital name from user context, localStorage, or auth
+      const hospitalName = localStorage.getItem("hospitalName"); // Example
+      const res = await fetch(`http://localhost:3001/all-records?hospitalName=${encodeURIComponent(hospitalName || "")}`);
+      const data = await res.json();
+      setRecords(
+        (data.records || []).map((r: any) => ({
+          id: r.recordId || r.id,
+          patientName: r.patientName,
+          hospitalName: r.hospitalName,
+          status: r.status,
+          fileType: r.files?.[0]?.mimetype || "N/A",
+          size: r.files?.[0]?.size ? `${Math.round(r.files[0].size / 1024)} KB` : "N/A",
+          uploadDate: r.uploadedAt || "",
+          verificationDate: r.verificationDate || r.verifiedAt || ""
+        }))
+      );
+    } catch (error) {
+      console.error('Failed to fetch records:', error);
+      toast({
+        title: "Error",
+        description: "Failed to fetch records",
+        variant: "destructive"
+      });
+    }
   };
-  fetchVerifiedRecords();
-}, []);
+  fetchAllRecords();
+}, [toast]);
+
+  // Function to verify/reject pending records
+  const handleAdminAction = async (recordId: string, action: 'verify' | 'reject') => {
+    try {
+      const res = await fetch('http://localhost:3001/admin-verify-record', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ recordId, action })
+      });
+      
+      const data = await res.json();
+      
+      if (res.ok) {
+        // Update the record in the local state
+        setRecords(prev => prev.map(record => 
+          record.id === recordId 
+            ? { ...record, status: data.newStatus as 'verified' | 'invalid', verificationDate: new Date().toISOString() }
+            : record
+        ));
+        
+        toast({
+          title: "Success",
+          description: data.message,
+        });
+      } else {
+        throw new Error(data.error);
+      }
+    } catch (error) {
+      console.error('Failed to update record:', error);
+      toast({
+        title: "Error",
+        description: `Failed to ${action} record`,
+        variant: "destructive"
+      });
+    }
+  };
 
   // Dashboard statistics
   const totalRecords = records.length;
@@ -348,6 +398,7 @@ const Dashboard: React.FC = () => {
                   <th className="text-left p-4 font-semibold text-foreground">Status</th>
                   <th className="text-left p-4 font-semibold text-foreground">File</th>
                   <th className="text-left p-4 font-semibold text-foreground">Upload Date</th>
+                  <th className="text-left p-4 font-semibold text-foreground">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -370,11 +421,54 @@ const Dashboard: React.FC = () => {
                         {record.fileType} • {record.size}
                       </td>
                       <td className="p-4 text-muted-foreground">{formatDate(record.uploadDate)}</td>
+                      <td className="p-4">
+                        {record.status === 'pending' ? (
+                          <div className="flex gap-2">
+                            <Button 
+                              size="sm" 
+                              variant="default"
+                              onClick={() => handleAdminAction(record.id, 'verify')}
+                              className="h-8 px-3"
+                            >
+                              <CheckCircle className="w-4 h-4 mr-1" />
+                              Verify
+                            </Button>
+                            <Button 
+                              size="sm" 
+                              variant="destructive"
+                              onClick={() => handleAdminAction(record.id, 'reject')}
+                              className="h-8 px-3"
+                            >
+                              <XCircle className="w-4 h-4 mr-1" />
+                              Reject
+                            </Button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center text-muted-foreground text-sm">
+                            {record.status === 'verified' ? (
+                              <>
+                                <CheckCircle className="w-4 h-4 mr-1 text-green-500" />
+                                Verified
+                              </>
+                            ) : record.status === 'invalid' ? (
+                              <>
+                                <XCircle className="w-4 h-4 mr-1 text-red-500" />
+                                Rejected
+                              </>
+                            ) : (
+                              <>
+                                <AlertCircle className="w-4 h-4 mr-1 text-yellow-500" />
+                                Unknown
+                              </>
+                            )}
+                          </div>
+                        )}
+                      </td>
                     </tr>
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={6} className="p-8 text-center">
+                    <td colSpan={7} className="p-8 text-center">
                       <div className="text-muted-foreground">
                         <FileText className="w-12 h-12 mx-auto mb-4 opacity-50" />
                         <p className="text-lg font-medium mb-2">No records found</p>
