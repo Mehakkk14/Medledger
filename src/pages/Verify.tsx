@@ -17,6 +17,8 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { isHashStoredOnChain } from '@/services/blockchainService';
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from '@/config/firebase';
 
 interface VerificationResult {
   recordId: string;
@@ -45,38 +47,57 @@ const Verify = () => {
     setIsSearching(true);
     
     try {
-      const res = await fetch(`http://localhost:3001/verify-record/${searchId}`);
-      const data = await res.json();
-      console.log("Verify response:", data);
+      // Fetch record from Firestore
+      const recordRef = doc(db, 'medicalRecords', searchId);
+      const recordSnap = await getDoc(recordRef);
 
-      if (res.ok && data) {
-        if (data.record) {
-          setResult(data.record);
-            // check on chain if fileHash present
-            if (data.record.fileHash) {
-              const stored = await isHashStoredOnChain(data.record.fileHash, (window as any).REACT_APP_CONTRACT_ADDRESS, (window as any).REACT_APP_CONTRACT_ABI ? JSON.parse((window as any).REACT_APP_CONTRACT_ABI) : undefined);
-              setOnChainVerified(stored);
-            } else {
-              setOnChainVerified(false);
-            }
-        } else if (Object.keys(data).length > 0) {
-          setResult(data as VerificationResult);
+      if (recordSnap.exists()) {
+        const data = recordSnap.data();
+        const verificationTime = "0.5s";
+        
+        const recordResult: VerificationResult = {
+          recordId: data.recordId || searchId,
+          status: (data.status as "verified" | "invalid" | "pending") || "pending",
+          patientName: data.patientName || 'N/A',
+          hospitalName: data.hospitalName || 'N/A',
+          uploadedAt: data.uploadedAt || new Date().toISOString(),
+          txHash: data.txHash || '',
+          fileHash: data.fileHash || '',
+          verificationTime: verificationTime
+        };
+        
+        setResult(recordResult);
+        
+        // Check on-chain if fileHash is present
+        if (data.fileHash && data.fileHash.startsWith('0x')) {
+          try {
+            const stored = await isHashStoredOnChain(data.fileHash, undefined, undefined);
+            setOnChainVerified(stored);
+          } catch (error) {
+            console.error('On-chain verification error:', error);
+            setOnChainVerified(false);
+          }
         } else {
-          setResult(null);
-          toast.error("Record not found or invalid.");
+          setOnChainVerified(false);
         }
+        
+        toast.success("Record found!");
       } else {
         setResult(null);
-        toast.error("Record not found or invalid.");
+        setOnChainVerified(null);
+        toast.error("Record not found");
       }
 
+      // Add to search history
       setSearchHistory(prev => {
         const newHistory = [searchId, ...prev.filter(id => id !== searchId)].slice(0, 5);
         return newHistory;
       });
     } catch (error) {
+      console.error('Verification error:', error);
       toast.error("Verification failed. Please try again.");
       setResult(null);
+      setOnChainVerified(null);
     } finally {
       setIsSearching(false);
     }

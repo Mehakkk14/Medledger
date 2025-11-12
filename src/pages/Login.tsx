@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { GlassCard } from "@/components/ui/glass-card";
 import { GradientButton } from "@/components/ui/gradient-button";
 import { 
@@ -11,6 +11,7 @@ import {
   ArrowRight
 } from "lucide-react";
 import { toast } from "sonner";
+import { useAuth } from "@/hooks/useAuth";
 
 const Login = () => {
   const [formData, setFormData] = useState({
@@ -19,6 +20,8 @@ const Login = () => {
   });
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const { login } = useAuth();
+  const navigate = useNavigate();
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
@@ -36,26 +39,16 @@ const Login = () => {
     setIsLoading(true);
 
     try {
-      // Send login request to backend
-      const res = await fetch('http://localhost:3001/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData)
-      });
-      const data = await res.json();
-
-      if (res.ok && data.hospitalName) {
-        // Save hospital name and user info to localStorage
-        localStorage.setItem("hospitalName", data.hospitalName);
-        localStorage.setItem("userEmail", formData.email);
-        localStorage.setItem("isLoggedIn", "true");
-
+      const success = await login(formData.email, formData.password);
+      
+      if (success) {
         toast.success("Login successful! Welcome back.");
-        window.location.href = "/dashboard";
+        navigate("/dashboard");
       } else {
-        toast.error(data.error || "Invalid credentials. Please try again.");
+        toast.error("Invalid credentials. Please try again.");
       }
     } catch (error) {
+      console.error('Login error:', error);
       toast.error("Login failed. Please try again.");
     } finally {
       setIsLoading(false);

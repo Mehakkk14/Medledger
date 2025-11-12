@@ -7,21 +7,94 @@ declare global {
   }
 }
 
+// Expected Chain ID for your contract (update based on your deployment)
+const EXPECTED_CHAIN_ID = 11155111; // Sepolia Testnet
+const EXPECTED_CHAIN_NAME = "Sepolia Testnet";
+
 const getProvider = () => {
   if (window.ethereum) return new ethers.BrowserProvider(window.ethereum);
   return null;
 };
 
+export async function checkNetwork(): Promise<{ correct: boolean; currentChainId: number | null; expectedChainId: number }> {
+  if (!window.ethereum) {
+    return { correct: false, currentChainId: null, expectedChainId: EXPECTED_CHAIN_ID };
+  }
+  
+  try {
+    const provider = new ethers.BrowserProvider(window.ethereum);
+    const network = await provider.getNetwork();
+    const currentChainId = Number(network.chainId);
+    
+    return {
+      correct: currentChainId === EXPECTED_CHAIN_ID,
+      currentChainId,
+      expectedChainId: EXPECTED_CHAIN_ID
+    };
+  } catch (error) {
+    console.error('Network check error:', error);
+    return { correct: false, currentChainId: null, expectedChainId: EXPECTED_CHAIN_ID };
+  }
+}
+
+export async function switchToCorrectNetwork(): Promise<boolean> {
+  if (!window.ethereum) return false;
+  
+  try {
+    await window.ethereum.request({
+      method: 'wallet_switchEthereumChain',
+      params: [{ chainId: `0x${EXPECTED_CHAIN_ID.toString(16)}` }],
+    });
+    return true;
+  } catch (switchError: any) {
+    // This error code indicates that the chain has not been added to MetaMask
+    if (switchError.code === 4902) {
+      try {
+        await window.ethereum.request({
+          method: 'wallet_addEthereumChain',
+          params: [{
+            chainId: `0x${EXPECTED_CHAIN_ID.toString(16)}`,
+            chainName: EXPECTED_CHAIN_NAME,
+            nativeCurrency: {
+              name: 'Sepolia ETH',
+              symbol: 'SepoliaETH',
+              decimals: 18
+            },
+            rpcUrls: ['https://sepolia.infura.io/v3/'],
+            blockExplorerUrls: ['https://sepolia.etherscan.io/']
+          }]
+        });
+        return true;
+      } catch (addError) {
+        console.error('Error adding network:', addError);
+        return false;
+      }
+    }
+    console.error('Error switching network:', switchError);
+    return false;
+  }
+}
+
 export async function connectWallet(): Promise<string | null> {
   if (!window.ethereum) return null;
+  
+  // Check network first
+  const networkCheck = await checkNetwork();
+  if (!networkCheck.correct) {
+    const switched = await switchToCorrectNetwork();
+    if (!switched) {
+      throw new Error(`Please switch to ${EXPECTED_CHAIN_NAME} in MetaMask`);
+    }
+  }
+  
   const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
   return accounts && accounts[0] ? accounts[0] : null;
 }
 
-export function getSigner() {
+export async function getSigner() {
   if (!window.ethereum) return null;
   const provider = new ethers.BrowserProvider(window.ethereum);
-  return provider.getSigner();
+  return await provider.getSigner();
 }
 
 function normalizeToBytes32(hex: string) {
@@ -35,16 +108,16 @@ function normalizeToBytes32(hex: string) {
 }
 
 export async function storeHashOnChain(fileHash: string, contractAddress?: string, contractAbi?: any): Promise<string> {
-  const signer = getSigner();
+  const signer = await getSigner();
   if (!signer) throw new Error('No wallet connected');
   const addr = contractAddress || contractConfig.CONTRACT_ADDRESS;
   const abi = contractAbi || contractConfig.CONTRACT_ABI;
   if (!addr || !abi) throw new Error('Contract config missing');
-  const contract = new ethers.Contract(addr, abi, signer as any);
+  const contract = new ethers.Contract(addr, abi, signer);
   const bytes32 = normalizeToBytes32(fileHash);
   const tx = await contract.storeHash(bytes32);
   const receipt = await tx.wait();
-  return (receipt as any)?.transactionHash || (tx as any).hash;
+  return receipt?.hash || tx.hash;
 }
 
 export async function isHashStoredOnChain(fileHash: string, contractAddress?: string, contractAbi?: any): Promise<boolean> {
@@ -76,4 +149,6 @@ export default {
   getSigner,
   storeHashOnChain,
   isHashStoredOnChain,
+  checkNetwork,
+  switchToCorrectNetwork,
 };

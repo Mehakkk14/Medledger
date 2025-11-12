@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { GlassCard } from "@/components/ui/glass-card";
 import { GradientButton } from "@/components/ui/gradient-button";
 import { 
@@ -15,6 +15,7 @@ import {
   ArrowRight
 } from "lucide-react";
 import { toast } from "sonner";
+import { useAuth } from "@/hooks/useAuth";
 
 const Signup = () => {
   const [formData, setFormData] = useState({
@@ -30,6 +31,8 @@ const Signup = () => {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [acceptedTerms, setAcceptedTerms] = useState(false);
+  const { signup } = useAuth();
+  const navigate = useNavigate();
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
@@ -66,31 +69,27 @@ const Signup = () => {
     }
     setIsLoading(true);
     try {
-      const res = await fetch('http://localhost:3001/register-hospital', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: formData.email,
-          password: formData.password,
-          profile: {
-            firstName: formData.firstName,
-            lastName: formData.lastName,
-            phone: formData.phone,
-            organization: formData.organization
-          }
-        })
+      const success = await signup({
+        email: formData.email,
+        password: formData.password,
+        firstName: formData.firstName,
+        lastName: formData.lastName,
+        phone: formData.phone,
+        organization: formData.organization,
+        hospitalName: formData.organization,
+        role: 'user'
       });
-      const data = await res.json();
-      if (res.ok) {
-        toast.success("Account created successfully! You can now log in.");
-        // Auto-login after successful signup
+      
+      if (success) {
+        toast.success("Account created successfully! You can now login.");
         setTimeout(() => {
-          window.location.href = "/login";
-        }, 1000);
+          navigate("/login");
+        }, 1500);
       } else {
-        toast.error(data.error || "Failed to create account. Please try again.");
+        toast.error("Failed to create account. Please try again.");
       }
     } catch (error) {
+      console.error('Signup error:', error);
       toast.error("Failed to create account. Please try again.");
     } finally {
       setIsLoading(false);

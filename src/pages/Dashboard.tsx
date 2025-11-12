@@ -30,6 +30,10 @@ import {
   Tooltip 
 } from "recharts";
 import { useToast } from "@/components/ui/use-toast";
+import { useAuth } from "@/hooks/useAuth";
+import { useNavigate } from "react-router-dom";
+import { collection, query, where, getDocs, doc, updateDoc } from 'firebase/firestore';
+import { db } from '@/config/firebase';
 
 interface MedicalRecord {
   id: string;
@@ -49,82 +53,95 @@ const Dashboard: React.FC = () => {
   const recordsPerPage = 8;
   const [records, setRecords] = useState<MedicalRecord[]>([]);
   const { toast } = useToast();
-  
-  // Check authentication
-  const isLoggedIn = localStorage.getItem("isLoggedIn") === "true";
-  const hospitalName = localStorage.getItem("hospitalName");
-  
-  if (!isLoggedIn) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <GlassCard className="p-8 text-center max-w-md">
-          <h2 className="text-2xl font-bold mb-4">Access Restricted</h2>
-          <p className="text-muted-foreground mb-6">Please log in to access the dashboard.</p>
-          <Button onClick={() => window.location.href = "/login"}>
-            Go to Login
-          </Button>
-        </GlassCard>
-      </div>
-    );
-  }
+  const { user, isAuthenticated } = useAuth();
+  const navigate = useNavigate();
 
- useEffect(() => {
-  const fetchAllRecords = async () => {
-    try {
-      // Get hospital name from user context, localStorage, or auth
-      const hospitalName = localStorage.getItem("hospitalName"); // Example
-      const res = await fetch(`http://localhost:3001/all-records?hospitalName=${encodeURIComponent(hospitalName || "")}`);
-      const data = await res.json();
-      setRecords(
-        (data.records || []).map((r: any) => ({
-          id: r.recordId || r.id,
-          patientName: r.patientName,
-          hospitalName: r.hospitalName,
-          status: r.status,
-          fileType: r.files?.[0]?.mimetype || "N/A",
-          size: r.files?.[0]?.size ? `${Math.round(r.files[0].size / 1024)} KB` : "N/A",
-          uploadDate: r.uploadedAt || "",
-          verificationDate: r.verificationDate || r.verifiedAt || ""
-        }))
-      );
-    } catch (error) {
-      console.error('Failed to fetch records:', error);
+  // Redirect to login if not authenticated
+  useEffect(() => {
+    if (!isAuthenticated) {
       toast({
-        title: "Error",
-        description: "Failed to fetch records",
+        title: "Authentication Required",
+        description: "Please login to view your dashboard",
         variant: "destructive"
       });
+      navigate('/login');
     }
-  };
-  fetchAllRecords();
-}, [toast]);
+  }, [isAuthenticated, navigate, toast]);
+
+  useEffect(() => {
+    const fetchAllRecords = async () => {
+      if (!user || !user.uid) return;
+      
+      try {
+        // Query Firestore for records belonging to this user
+        const q = query(
+          collection(db, 'medicalRecords'),
+          where('hospitalUid', '==', user.uid)
+        );
+        
+        const querySnapshot = await getDocs(q);
+        const fetchedRecords: MedicalRecord[] = [];
+        
+        querySnapshot.forEach((doc) => {
+          const data = doc.data();
+          fetchedRecords.push({
+            id: data.recordId || doc.id,
+            patientName: data.patientName || 'N/A',
+            hospitalName: data.hospitalName || user.hospitalName,
+            status: (data.status as "verified" | "pending" | "invalid") || "pending",
+            fileType: data.files?.[0]?.type || "N/A",
+            size: data.files?.[0]?.size ? `${Math.round(data.files[0].size / 1024)} KB` : "N/A",
+            uploadDate: data.uploadedAt || "",
+            verificationDate: data.verifiedAt || data.verificationDate || ""
+          });
+        });
+        
+        // Sort by upload date (newest first)
+        fetchedRecords.sort((a, b) => {
+          const dateA = new Date(a.uploadDate).getTime();
+          const dateB = new Date(b.uploadDate).getTime();
+          return dateB - dateA;
+        });
+        
+        setRecords(fetchedRecords);
+      } catch (error) {
+        console.error('Failed to fetch records:', error);
+        toast({
+          title: "Error",
+          description: "Failed to fetch records",
+          variant: "destructive"
+        });
+      }
+    };
+    
+    if (user) {
+      fetchAllRecords();
+    }
+  }, [user, toast]);
 
   // Function to verify/reject pending records
   const handleAdminAction = async (recordId: string, action: 'verify' | 'reject') => {
     try {
-      const res = await fetch('http://localhost:3001/admin-verify-record', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ recordId, action })
+      const recordRef = doc(db, 'medicalRecords', recordId);
+      const newStatus = action === 'verify' ? 'verified' : 'invalid';
+      
+      await updateDoc(recordRef, {
+        status: newStatus,
+        verifiedAt: new Date().toISOString(),
+        verifiedBy: user?.email || 'admin'
       });
       
-      const data = await res.json();
+      // Update the record in the local state
+      setRecords(prev => prev.map(record => 
+        record.id === recordId 
+          ? { ...record, status: newStatus as 'verified' | 'invalid', verificationDate: new Date().toISOString() }
+          : record
+      ));
       
-      if (res.ok) {
-        // Update the record in the local state
-        setRecords(prev => prev.map(record => 
-          record.id === recordId 
-            ? { ...record, status: data.newStatus as 'verified' | 'invalid', verificationDate: new Date().toISOString() }
-            : record
-        ));
-        
-        toast({
-          title: "Success",
-          description: data.message,
-        });
-      } else {
-        throw new Error(data.error);
-      }
+      toast({
+        title: "Success",
+        description: `Record ${action === 'verify' ? 'verified' : 'rejected'} successfully`,
+      });
     } catch (error) {
       console.error('Failed to update record:', error);
       toast({

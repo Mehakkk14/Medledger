@@ -3,14 +3,24 @@ const cors = require('cors');
 const multer = require('multer');
 
 const app = express();
-app.use(cors());
+app.use(cors({
+  origin: ['http://localhost:8080', 'http://127.0.0.1:8080'],
+  credentials: true
+}));
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 // Setup multer for handling file uploads
 const upload = multer({ dest: 'uploads/' });
 
-// In-memory storage for demo
-const hospitals = [
+// Request logging
+app.use((req, res, next) => {
+  console.log(`${req.method} ${req.path}`, req.body ? 'Body present' : 'No body');
+  next();
+});
+
+// In-memory storage for demo - this will persist during server session
+let hospitals = [
   {
     id: 1,
     email: 'rastogimehak3845@gmail.com',
@@ -19,7 +29,10 @@ const hospitals = [
   }
 ];
 
-const records = [
+let hospitalIdCounter = 2;
+
+// In-memory records storage - will persist during server session
+let records = [
   {
     id: 'MR0005',
     recordId: 'MR0005',
@@ -65,14 +78,32 @@ app.post('/register-hospital', (req, res) => {
   const { email, password, profile } = req.body;
   console.log('Registration attempt:', email, profile);
   
-  hospitals.push({
-    id: hospitals.length + 1,
+  // Check if email already exists
+  const existingHospital = hospitals.find(h => h.email === email);
+  if (existingHospital) {
+    return res.status(400).json({ error: 'Email already registered' });
+  }
+  
+  // Validate required fields
+  if (!email || !password || !profile?.organization) {
+    return res.status(400).json({ error: 'Email, password, and organization are required' });
+  }
+  
+  const newHospital = {
+    id: hospitalIdCounter++,
     email,
     password,
-    hospitalName: profile.organization
-  });
+    hospitalName: profile.organization || profile.hospitalName,
+    firstName: profile.firstName || '',
+    lastName: profile.lastName || '',
+    phone: profile.phone || '',
+    createdAt: new Date().toISOString()
+  };
   
-  res.json({ uid: 'test-uid-' + hospitals.length });
+  hospitals.push(newHospital);
+  console.log('New hospital registered:', newHospital.hospitalName);
+  
+  res.json({ uid: 'test-uid-' + newHospital.id, hospitalName: newHospital.hospitalName });
 });
 
 // Get all records
@@ -102,20 +133,44 @@ app.post('/admin-verify-record', (req, res) => {
   const { recordId, action } = req.body;
   console.log('Admin action:', action, 'for record:', recordId);
   
-  const record = records.find(r => r.recordId === recordId);
-  if (record) {
+  if (!recordId || !action) {
+    return res.status(400).json({ error: 'Record ID and action are required' });
+  }
+  
+  if (!['verify', 'reject'].includes(action)) {
+    return res.status(400).json({ error: 'Action must be "verify" or "reject"' });
+  }
+  
+  const recordIndex = records.findIndex(r => r.recordId === recordId);
+  if (recordIndex !== -1) {
+    const record = records[recordIndex];
+    
+    // Update record status
     record.status = action === 'verify' ? 'verified' : 'invalid';
     record.verifiedAt = new Date().toISOString();
     record.verifiedBy = 'admin';
     
-    // Add blockchain hashes if verifying and not already present
-    if (action === 'verify' && !record.txHash) {
-      record.fileHash = '0x' + Math.random().toString(16).substr(2, 64);
-      record.txHash = '0x' + Math.random().toString(16).substr(2, 64);
+    // Add blockchain transaction hash if verifying
+    if (action === 'verify') {
+      if (!record.txHash || record.txHash === '') {
+        record.txHash = '0x' + Math.random().toString(16).substr(2, 64);
+      }
+      if (!record.fileHash || record.fileHash === '') {
+        record.fileHash = '0x' + Math.random().toString(16).substr(2, 64);
+      }
     }
     
-    res.json({ status: 'ok', newStatus: record.status });
+    console.log(`Record ${recordId} ${action === 'verify' ? 'verified' : 'rejected'} by admin`);
+    
+    res.json({ 
+      status: 'ok', 
+      newStatus: record.status,
+      message: `Record ${action === 'verify' ? 'verified' : 'rejected'} successfully`,
+      txHash: record.txHash,
+      fileHash: record.fileHash
+    });
   } else {
+    console.log('Record not found:', recordId);
     res.status(404).json({ error: 'Record not found' });
   }
 });
@@ -127,8 +182,20 @@ app.post('/upload-record', upload.array('files'), (req, res) => {
   
   console.log('Upload record:', recordId, patientName, hospitalName);
   console.log('Files uploaded:', files.length);
+  console.log('Request body:', req.body);
   
-  // Use client hash if provided, otherwise generate one
+  // Validate required fields
+  if (!recordId || !patientName || !hospitalName) {
+    return res.status(400).json({ error: 'Record ID, Patient Name, and Hospital Name are required' });
+  }
+  
+  // Check if record ID already exists
+  const existingRecord = records.find(r => r.recordId === recordId);
+  if (existingRecord) {
+    return res.status(400).json({ error: 'Record ID already exists' });
+  }
+  
+  // Generate hashes (use client hash if provided, otherwise generate)
   const fileHash = clientFileHash || ('0x' + Math.random().toString(16).substr(2, 64));
   const txHash = clientTxHash || ('0x' + Math.random().toString(16).substr(2, 64));
   
@@ -136,31 +203,62 @@ app.post('/upload-record', upload.array('files'), (req, res) => {
     id: recordId,
     recordId,
     patientName,
-    patientContact,
-    aadhaarNumber,
+    patientContact: patientContact || '',
+    aadhaarNumber: aadhaarNumber || '',
     hospitalName,
-    note,
-    status: clientTxHash ? 'verified' : 'pending', // If client provided txHash, mark as verified
+    note: note || '',
+    status: 'pending', // All new records start as pending for admin approval
     uploadedAt: new Date().toISOString(),
-    files: files.map(f => ({
+    files: files.length > 0 ? files.map(f => ({
       originalname: f.originalname,
       mimetype: f.mimetype,
-      size: f.size
-    })),
+      size: f.size,
+      path: f.path
+    })) : [{mimetype: 'application/pdf', size: 1024000}], // Default if no files
     fileHash,
-    txHash: clientTxHash || '', // Only set txHash if client provided it
-    ...(clientTxHash && {
-      verifiedAt: new Date().toISOString(),
-      verifiedBy: 'blockchain'
-    })
+    txHash: '', // Will be set when verified
+    uploadedBy: hospitalName,
+    verificationTime: Math.random().toFixed(2) + 's'
   };
   
   records.push(newRecord);
-  console.log('Record added:', recordId, 'Status:', newRecord.status);
+  console.log('Record added:', recordId, 'Status:', newRecord.status, 'Total records:', records.length);
   
-  res.json({ status: 'ok', fileHash, txHash });
+  res.json({ 
+    status: 'ok', 
+    fileHash, 
+    txHash: fileHash, // Return fileHash as txHash for now
+    message: 'Record uploaded successfully and pending verification'
+  });
+});
+
+// Debug endpoints
+app.get('/debug/hospitals', (req, res) => {
+  res.json({ hospitals, count: hospitals.length });
+});
+
+app.get('/debug/records', (req, res) => {
+  res.json({ records, count: records.length });
+});
+
+app.get('/debug/status', (req, res) => {
+  res.json({ 
+    status: 'running',
+    hospitalsCount: hospitals.length,
+    recordsCount: records.length,
+    timestamp: new Date().toISOString()
+  });
 });
 
 app.listen(3001, () => {
   console.log('Simple backend running on port 3001');
+  console.log('Available endpoints:');
+  console.log('POST /login - Hospital login');
+  console.log('POST /register-hospital - Register new hospital');
+  console.log('GET  /all-records?hospitalName=X - Get records for hospital');
+  console.log('POST /upload-record - Upload new medical record');
+  console.log('POST /admin-verify-record - Verify/reject pending records');
+  console.log('GET  /verify-record/:id - Get record details');
+  console.log('GET  /debug/status - Server status');
+  console.log('\nDemo hospital: rastogimehak3845@gmail.com / mehak1234');
 });

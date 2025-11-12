@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef } from "react";
 import { GlassCard } from "@/components/ui/glass-card";
 import { GradientButton } from "@/components/ui/gradient-button";
 import { 
@@ -12,6 +12,10 @@ import {
 import { toast } from "sonner";
 import { storeHashOnChain, connectWallet } from '@/services/blockchainService';
 import { sha256 } from 'js-sha256';
+import { useAuth } from '@/hooks/useAuth';
+import { collection, addDoc, doc, setDoc } from 'firebase/firestore';
+import { db } from '@/config/firebase';
+import { useNavigate } from 'react-router-dom';
 
 interface FormData {
   patientName: string;
@@ -36,23 +40,22 @@ const Upload = () => {
     hospitalName: "",
     note: ""
   });
-
-  // Auto-fill hospital name and generate record ID
-  useEffect(() => {
-    const hospitalName = localStorage.getItem("hospitalName");
-    const recordId = `MR${Date.now().toString().slice(-8)}`;
-    setFormData(prev => ({ 
-      ...prev, 
-      hospitalName: hospitalName || "",
-      recordId 
-    }));
-  }, []);
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [txHash, setTxHash] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const { user, isAuthenticated } = useAuth();
+  const navigate = useNavigate();
+
+  // Redirect to login if not authenticated
+  React.useEffect(() => {
+    if (!isAuthenticated) {
+      toast.error("Please login to upload records");
+      navigate('/login');
+    }
+  }, [isAuthenticated, navigate]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
@@ -133,6 +136,12 @@ const Upload = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
+    if (!user || !user.uid) {
+      toast.error("Please login to upload records");
+      navigate('/login');
+      return;
+    }
+    
     const errors = validateForm();
     if (errors.length > 0) {
       errors.forEach(error => toast.error(error));
@@ -141,68 +150,102 @@ const Upload = () => {
 
     setIsSubmitting(true);
     
-      try {
-        // compute combined client-side hash (sha256)
-        const combined = await (async () => {
-          const buffers = await Promise.all(uploadedFiles.map(f => f.file.arrayBuffer()));
-          const concat = buffers.reduce((acc, cur) => {
-            const tmp = new Uint8Array(acc.byteLength + cur.byteLength);
-            tmp.set(new Uint8Array(acc), 0);
-            tmp.set(new Uint8Array(cur), acc.byteLength);
-            return tmp.buffer as ArrayBuffer;
-          }, new ArrayBuffer(0));
-          return '0x' + sha256(new Uint8Array(concat));
-        })();
+    try {
+      // Compute combined client-side hash (sha256)
+      const combined = await (async () => {
+        const buffers = await Promise.all(uploadedFiles.map(f => f.file.arrayBuffer()));
+        const concat = buffers.reduce((acc, cur) => {
+          const tmp = new Uint8Array(acc.byteLength + cur.byteLength);
+          tmp.set(new Uint8Array(acc), 0);
+          tmp.set(new Uint8Array(cur), acc.byteLength);
+          return tmp.buffer as ArrayBuffer;
+        }, new ArrayBuffer(0));
+        return '0x' + sha256(new Uint8Array(concat));
+      })();
 
-        // Optionally push to chain via MetaMask if available and configured
-        let clientTxHash: string | undefined = undefined;
+      // Push to chain via MetaMask if available and configured
+      let clientTxHash: string | undefined = undefined;
+      let blockchainError: string | null = null;
+      
+      // Check if MetaMask is installed
+      if (!window.ethereum) {
+        toast.error("MetaMask not detected! Please install MetaMask browser extension.");
+        blockchainError = "MetaMask not installed";
+      } else {
         try {
+          toast.info("Connecting to MetaMask...");
           const addr = await connectWallet();
+          
           if (addr) {
-            // call the contract using signer
+            toast.success(`Wallet connected: ${addr.slice(0, 6)}...${addr.slice(-4)}`);
+            toast.info("Storing hash on blockchain... Please confirm the transaction in MetaMask.");
+            
             try {
               const tx = await storeHashOnChain(combined, undefined, undefined);
               clientTxHash = tx;
-            } catch (err) {
-              console.warn('Client-side storeHash failed or not configured', err);
+              toast.success("✅ Hash stored on blockchain successfully!");
+            } catch (err: any) {
+              console.error('Blockchain storage error:', err);
+              blockchainError = err.message || 'Blockchain transaction failed';
+              
+              if (err.message?.includes('user rejected')) {
+                toast.error("Transaction rejected by user");
+              } else if (err.message?.includes('insufficient funds')) {
+                toast.error("Insufficient funds for gas fees");
+              } else {
+                toast.warning("⚠️ Blockchain storage failed, saving to database only");
+              }
             }
+          } else {
+            toast.error("Failed to connect wallet");
+            blockchainError = "Wallet connection failed";
           }
-        } catch (e) {
-          // ignore wallet connect errors
+        } catch (e: any) {
+          console.error('Wallet connect error:', e);
+          blockchainError = e.message || 'Wallet connection error';
+          toast.error("Failed to connect to MetaMask");
         }
-
-        // Build multipart form data
-        const body = new FormData();
-        body.append('patientName', formData.patientName);
-        body.append('patientContact', formData.patientContact);
-        body.append('aadhaarNumber', formData.aadhaarNumber);
-        body.append('recordId', formData.recordId);
-        body.append('hospitalName', formData.hospitalName);
-        body.append('note', formData.note);
-    body.append('clientFileHash', combined);
-    if (clientTxHash) body.append('clientTxHash', clientTxHash);
-        uploadedFiles.forEach(f => body.append('files', f.file, f.file.name));
-
-        const res = await fetch('http://localhost:3001/upload-record', {
-          method: 'POST',
-          body,
-        });
-
-        const data = await res.json();
-
-        if (res.ok) {
-          setTxHash(data.txHash || '0x' + Math.random().toString(16).slice(2).padEnd(64, '0'));
-          setIsSuccess(true);
-          toast.success("Medical record uploaded successfully!");
-        } else {
-          toast.error(data.error || "Failed to upload record. Please try again.");
-        }
-      } catch (error) {
-        console.error(error);
-        toast.error("Failed to upload record. Please try again.");
-      } finally {
-        setIsSubmitting(false);
       }
+
+      // Prepare record data for Firestore
+      const recordData = {
+        recordId: formData.recordId,
+        patientName: formData.patientName,
+        patientContact: formData.patientContact,
+        aadhaarNumber: formData.aadhaarNumber,
+        hospitalName: user.hospitalName || formData.hospitalName,
+        hospitalUid: user.uid,
+        note: formData.note,
+        fileHash: combined,
+        txHash: clientTxHash || '',
+        status: clientTxHash ? 'verified' : 'pending',
+        uploadedAt: new Date().toISOString(),
+        uploadedBy: user.email,
+        blockchainError: blockchainError,
+        files: uploadedFiles.map(f => ({
+          name: f.file.name,
+          type: f.file.type,
+          size: f.file.size
+        }))
+      };
+
+      // Store in Firestore
+      await setDoc(doc(db, 'medicalRecords', formData.recordId), recordData);
+
+      setTxHash(clientTxHash || '');
+      setIsSuccess(true);
+      
+      if (clientTxHash) {
+        toast.success("🎉 Medical record uploaded and verified on blockchain!");
+      } else {
+        toast.success("Medical record uploaded to database (blockchain pending)");
+      }
+    } catch (error: any) {
+      console.error('Upload error:', error);
+      toast.error(error.message || "Failed to upload record. Please try again.");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const resetForm = () => {
@@ -230,19 +273,33 @@ const Upload = () => {
             
             <h1 className="text-3xl font-bold text-success">Upload Successful!</h1>
             <p className="text-muted-foreground">
-              Your medical record has been successfully uploaded to the blockchain and is now immutably stored.
+              {txHash 
+                ? "Your medical record has been successfully uploaded to the blockchain and is now immutably stored."
+                : "Your medical record has been saved to the database. Blockchain verification pending."}
             </p>
             
-            <div className="bg-success/10 border border-success/30 rounded-lg p-4">
-              <div className="text-sm text-muted-foreground mb-2">Transaction Hash:</div>
-              <div className="font-mono text-sm break-all text-success">{txHash}</div>
-              <button 
-                onClick={() => navigator.clipboard.writeText(txHash)}
-                className="text-xs text-primary-neon hover:underline mt-2"
-              >
-                Copy to clipboard
-              </button>
-            </div>
+            {txHash && (
+              <div className="bg-success/10 border border-success/30 rounded-lg p-4">
+                <div className="text-sm text-muted-foreground mb-2">Transaction Hash:</div>
+                <div className="font-mono text-sm break-all text-success">{txHash}</div>
+                <button 
+                  onClick={() => navigator.clipboard.writeText(txHash)}
+                  className="text-xs text-primary-neon hover:underline mt-2"
+                >
+                  Copy to clipboard
+                </button>
+              </div>
+            )}
+            
+            {!txHash && (
+              <div className="bg-warning/10 border border-warning/30 rounded-lg p-4">
+                <div className="text-sm text-warning mb-2">⚠️ Blockchain Upload Pending</div>
+                <div className="text-xs text-muted-foreground">
+                  The record was saved to the database but not yet on blockchain. 
+                  Make sure MetaMask is installed and connected to the correct network.
+                </div>
+              </div>
+            )}
             
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
               <GradientButton onClick={resetForm}>
