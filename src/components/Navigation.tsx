@@ -90,11 +90,11 @@ const Navigation = () => {
               </div>
 
 
-              {/* Notifications */}
-              <button className="p-2 rounded-lg glass hover:bg-accent/50 transition-colors relative">
+              {/* Notifications - Disabled for production */}
+              {/* <button className="p-2 rounded-lg glass hover:bg-accent/50 transition-colors relative">
                 <Bell className="w-5 h-5 text-muted-foreground" />
                 <span className="absolute -top-1 -right-1 w-3 h-3 bg-danger rounded-full"></span>
-              </button>
+              </button> */}
 
               {/* Auth Buttons / User Menu */}
               {isAuthenticated ? (
