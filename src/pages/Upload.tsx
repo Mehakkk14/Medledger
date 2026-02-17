@@ -57,6 +57,16 @@ const Upload = () => {
     }
   }, [isAuthenticated, navigate]);
 
+  // Auto-populate hospital name from logged-in user
+  React.useEffect(() => {
+    if (user && user.hospitalName) {
+      setFormData(prev => ({
+        ...prev,
+        hospitalName: user.hospitalName
+      }));
+    }
+  }, [user]);
+
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
@@ -229,8 +239,10 @@ const Upload = () => {
         }))
       };
 
-      // Store in Firestore
-      await setDoc(doc(db, 'medicalRecords', formData.recordId), recordData);
+      // Store in Firestore with composite key (hospitalUid_recordId)
+      // This allows each hospital to have their own record ID namespace
+      const firestoreDocId = `${user.uid}_${formData.recordId}`;
+      await setDoc(doc(db, 'medicalRecords', firestoreDocId), recordData);
 
       setTxHash(clientTxHash || '');
       setIsSuccess(true);
@@ -391,11 +403,14 @@ const Upload = () => {
                   <input
                     type="text"
                     name="hospitalName"
-                    value={formData.hospitalName}
-                    onChange={handleInputChange}
-                    className="input-glass w-full"
-                    placeholder="Enter hospital name"
+                    value={formData.hospitalName || user?.hospitalName || ''}
+                    readOnly
+                    disabled
+                    className="input-glass w-full bg-muted/50 cursor-not-allowed"
+                    placeholder="Your hospital name"
+                    title="Hospital name is automatically set from your profile"
                   />
+                  <p className="text-xs text-muted-foreground mt-1">Auto-filled from your profile</p>
                 </div>
               </div>
             </GlassCard>

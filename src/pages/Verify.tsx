@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { GlassCard } from "@/components/ui/glass-card";
 import { GradientButton } from "@/components/ui/gradient-button";
 import { StatusBadge } from "@/components/ui/status-badge";
@@ -17,8 +17,10 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { isHashStoredOnChain } from '@/services/blockchainService';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from '@/config/firebase';
+import { useAuth } from '@/hooks/useAuth';
+import { useNavigate } from 'react-router-dom';
 
 interface VerificationResult {
   recordId: string;
@@ -33,26 +35,66 @@ interface VerificationResult {
 
 const Verify = () => {
   const [searchId, setSearchId] = useState("");
+  const [searchType, setSearchType] = useState<"recordId" | "fileHash">("recordId");
   const [isSearching, setIsSearching] = useState(false);
   const [result, setResult] = useState<VerificationResult | null>(null);
   const [onChainVerified, setOnChainVerified] = useState<boolean | null>(null);
   const [searchHistory, setSearchHistory] = useState<string[]>([]);
+  const { user, isAuthenticated } = useAuth();
+  const navigate = useNavigate();
+
+  // Redirect to login if not authenticated
+  useEffect(() => {
+    if (!isAuthenticated) {
+      toast.error("Please login to verify records");
+      navigate('/login');
+    }
+  }, [isAuthenticated, navigate]);
 
   const handleSearch = async () => {
     if (!searchId.trim()) {
-      toast.error("Please enter a Record ID");
+      toast.error(`Please enter a ${searchType === 'recordId' ? 'Record ID' : 'File Hash'}`);
       return;
     }
 
     setIsSearching(true);
     
     try {
-      // Fetch record from Firestore
-      const recordRef = doc(db, 'medicalRecords', searchId);
-      const recordSnap = await getDoc(recordRef);
+      let recordSnap;
+      let data;
 
-      if (recordSnap.exists()) {
-        const data = recordSnap.data();
+      if (searchType === 'recordId') {
+        // Search for record using composite key (hospitalUid_recordId)
+        const firestoreDocId = user ? `${user.uid}_${searchId}` : searchId;
+        const recordRef = doc(db, 'medicalRecords', firestoreDocId);
+        recordSnap = await getDoc(recordRef);
+        
+        if (recordSnap.exists()) {
+          data = recordSnap.data();
+        }
+      } else {
+        // Search by file hash - query all records with this file hash for this hospital
+        if (!user) {
+          toast.error("Please login to search by file hash");
+          setIsSearching(false);
+          return;
+        }
+        
+        const q = query(
+          collection(db, 'medicalRecords'),
+          where('hospitalUid', '==', user.uid),
+          where('fileHash', '==', searchId.trim())
+        );
+        
+        const querySnapshot = await getDocs(q);
+        
+        if (!querySnapshot.empty) {
+          // Take the first matching record
+          data = querySnapshot.docs[0].data();
+        }
+      }
+
+      if (data) {
         const verificationTime = "0.5s";
         
         const recordResult: VerificationResult = {
@@ -124,6 +166,83 @@ const Verify = () => {
     return dateString ? new Date(dateString).toLocaleString() : "";
   };
 
+  const downloadVerificationReport = () => {
+    if (!result) return;
+    
+    const reportContent = `
+═══════════════════════════════════════════════════════════════
+                    MEDICAL RECORD VERIFICATION REPORT
+═══════════════════════════════════════════════════════════════
+
+Generated: ${new Date().toLocaleString()}
+Report Type: Blockchain Verification
+
+───────────────────────────────────────────────────────────────
+VERIFICATION STATUS
+───────────────────────────────────────────────────────────────
+
+Status: ${result.status.toUpperCase()}
+Verification Time: ${result.verificationTime}
+On-chain Verification: ${onChainVerified ? 'CONFIRMED' : 'PENDING'}
+
+───────────────────────────────────────────────────────────────
+RECORD INFORMATION
+───────────────────────────────────────────────────────────────
+
+Record ID: ${result.recordId}
+Patient Name: ${result.patientName}
+Hospital/Organization: ${result.hospitalName}
+Upload Date: ${formatDate(result.uploadedAt)}
+
+───────────────────────────────────────────────────────────────
+BLOCKCHAIN DETAILS
+───────────────────────────────────────────────────────────────
+
+Transaction Hash:
+${result.txHash}
+
+File Hash:
+${result.fileHash}
+
+───────────────────────────────────────────────────────────────
+VERIFICATION STATEMENT
+───────────────────────────────────────────────────────────────
+
+${result.status === 'verified' 
+  ? 'This medical record has been successfully verified on the blockchain.\nThe record integrity is confirmed and the data has not been tampered with.'
+  : result.status === 'pending'
+  ? 'This medical record is pending verification on the blockchain.\nPlease check back later for confirmation.'
+  : 'This medical record could not be verified.\nThe data may have been modified or is not properly stored on the blockchain.'}
+
+───────────────────────────────────────────────────────────────
+DISCLAIMER
+───────────────────────────────────────────────────────────────
+
+This report is generated by MedLedger - Blockchain Medical Records
+Management System. The verification is based on cryptographic hashing
+and blockchain technology to ensure data integrity and authenticity.
+
+For more information, visit: ${window.location.origin}
+
+═══════════════════════════════════════════════════════════════
+                          END OF REPORT
+═══════════════════════════════════════════════════════════════
+    `.trim();
+
+    // Create blob and download
+    const blob = new Blob([reportContent], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `MedLedger_Verification_Report_${result.recordId}_${new Date().getTime()}.txt`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    
+    toast.success("Verification report downloaded successfully!");
+  };
+
   const getStatusColor = (status?: string) => {
     switch (status) {
       case "verified": return "text-success";
@@ -158,10 +277,44 @@ const Verify = () => {
         <GlassCard className="mb-8">
           <div className="space-y-6">
             <div className="text-center">
-              <h2 className="text-2xl font-semibold mb-2">Enter Record ID</h2>
+              <h2 className="text-2xl font-semibold mb-2">Search Medical Records</h2>
               <p className="text-muted-foreground">
-                Enter the unique Record ID to verify its authenticity
+                Search by Record ID or File Hash to verify authenticity
               </p>
+            </div>
+
+            {/* Search Type Toggle */}
+            <div className="flex justify-center gap-2">
+              <button
+                onClick={() => {
+                  setSearchType('recordId');
+                  setSearchId('');
+                  setResult(null);
+                }}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                  searchType === 'recordId'
+                    ? 'bg-primary-neon text-background'
+                    : 'glass text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                <FileText className="w-4 h-4 inline mr-2" />
+                Record ID
+              </button>
+              <button
+                onClick={() => {
+                  setSearchType('fileHash');
+                  setSearchId('');
+                  setResult(null);
+                }}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                  searchType === 'fileHash'
+                    ? 'bg-primary-neon text-background'
+                    : 'glass text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                <Hash className="w-4 h-4 inline mr-2" />
+                File Hash
+              </button>
             </div>
 
             <div className="max-w-2xl mx-auto">
@@ -173,7 +326,11 @@ const Verify = () => {
                   onChange={(e) => setSearchId(e.target.value)}
                   onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
                   className="input-glass w-full pl-12 pr-4 py-4 text-lg"
-                  placeholder="MR-2024-XXXXX"
+                  placeholder={
+                    searchType === 'recordId' 
+                      ? "MR-2024-XXXXX" 
+                      : "0xc3d1cd6e772134..."
+                  }
                 />
               </div>
               
@@ -361,10 +518,23 @@ const Verify = () => {
               {/* Additional Actions */}
               <div className="border-t border-border/30 pt-6">
                 <div className="flex flex-col sm:flex-row gap-4 justify-center">
-                  <GradientButton variant="outline">
+                  <GradientButton 
+                    variant="outline"
+                    onClick={() => {
+                      if (result?.txHash) {
+                        // Open blockchain explorer (adjust URL based on your network)
+                        window.open(`https://sepolia.etherscan.io/tx/${result.txHash}`, '_blank');
+                      } else {
+                        toast.error("Transaction hash not available");
+                      }
+                    }}
+                  >
                     View on Blockchain Explorer
                   </GradientButton>
-                  <GradientButton variant="outline">
+                  <GradientButton 
+                    variant="outline"
+                    onClick={downloadVerificationReport}
+                  >
                     Download Verification Report
                   </GradientButton>
                 </div>

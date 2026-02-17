@@ -1,8 +1,15 @@
 import React, { useState } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { GlassCard } from "@/components/ui/glass-card";
 import { GradientButton } from "@/components/ui/gradient-button";
-
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { useAuth } from "@/hooks/useAuth";
 import { connectWallet } from "@/services/blockchainService";
 import { 
@@ -13,7 +20,12 @@ import {
   X,
   Shield,
   Upload,
-  Search as SearchIcon
+  Search as SearchIcon,
+  LogOut,
+  Settings,
+  LayoutDashboard,
+  Building2,
+  Mail
 } from "lucide-react";
 
 const Navigation = () => {
@@ -21,6 +33,7 @@ const Navigation = () => {
   const { isAuthenticated, user, logout } = useAuth();
   const [walletAddress, setWalletAddress] = useState<string | null>(null);
   const location = useLocation();
+  const navigate = useNavigate();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -98,17 +111,53 @@ const Navigation = () => {
 
               {/* Auth Buttons / User Menu */}
               {isAuthenticated ? (
-                <div className="flex items-center space-x-2">
-                  <div className="text-sm text-muted-foreground hidden md:block">
-                    Welcome, {user?.firstName}
-                  </div>
-                  <button 
-                    onClick={logout}
-                    className="p-2 rounded-lg glass hover:bg-accent/50 transition-colors"
-                  >
-                    <User className="w-5 h-5 text-muted-foreground" />
-                  </button>
-                </div>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button className="flex items-center space-x-2 p-2 rounded-lg glass hover:bg-accent/50 transition-colors">
+                      <User className="w-5 h-5 text-muted-foreground" />
+                      <span className="text-sm text-muted-foreground hidden md:block">
+                        Welcome, {user?.firstName || 'User'}
+                      </span>
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-64 glass border-border/50">
+                    <DropdownMenuLabel className="font-normal">
+                      <div className="flex flex-col space-y-1">
+                        <p className="text-sm font-medium leading-none">
+                          {user?.firstName} {user?.lastName}
+                        </p>
+                        <p className="text-xs leading-none text-muted-foreground flex items-center gap-1">
+                          <Mail className="w-3 h-3" />
+                          {user?.email}
+                        </p>
+                        <p className="text-xs leading-none text-muted-foreground flex items-center gap-1 mt-1">
+                          <Building2 className="w-3 h-3" />
+                          {user?.hospitalName || user?.organization}
+                        </p>
+                      </div>
+                    </DropdownMenuLabel>
+                    <DropdownMenuSeparator className="bg-border/50" />
+                    <DropdownMenuItem onClick={() => navigate('/dashboard')} className="cursor-pointer">
+                      <LayoutDashboard className="w-4 h-4 mr-2" />
+                      Dashboard
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => navigate('/upload')} className="cursor-pointer">
+                      <Upload className="w-4 h-4 mr-2" />
+                      Upload Records
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator className="bg-border/50" />
+                    <DropdownMenuItem 
+                      onClick={() => {
+                        logout();
+                        navigate('/');
+                      }} 
+                      className="cursor-pointer text-danger focus:text-danger"
+                    >
+                      <LogOut className="w-4 h-4 mr-2" />
+                      Logout
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               ) : (
                 <div className="hidden md:flex items-center space-x-2">
                   <Link to="/login">
