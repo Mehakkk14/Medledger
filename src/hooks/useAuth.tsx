@@ -2,6 +2,8 @@ import { createContext, useContext, useState, useEffect, ReactNode } from 'react
 import { 
   signInWithEmailAndPassword, 
   createUserWithEmailAndPassword,
+  signInWithPopup,
+  GoogleAuthProvider,
   signOut,
   onAuthStateChanged,
   User as FirebaseUser
@@ -24,6 +26,7 @@ interface AuthContextType {
   firebaseUser: FirebaseUser | null;
   isAuthenticated: boolean;
   login: (email: string, password: string) => Promise<boolean>;
+  loginWithGoogle: () => Promise<boolean>;
   logout: () => void;
   signup: (userData: any) => Promise<boolean>;
   isLoading: boolean;
@@ -138,6 +141,49 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     }
   };
 
+  const loginWithGoogle = async (): Promise<boolean> => {
+    setIsLoading(true);
+    try {
+      const provider = new GoogleAuthProvider();
+      const userCredential = await signInWithPopup(auth, provider);
+      const firebaseUser = userCredential.user;
+      
+      // Check if user profile exists in Firestore
+      const userDocRef = doc(db, 'hospitals', firebaseUser.uid);
+      const userDoc = await getDoc(userDocRef);
+      
+      if (!userDoc.exists()) {
+        // Create new user profile for first-time Google sign-in
+        const displayName = firebaseUser.displayName || '';
+        const [firstName, ...lastNameParts] = displayName.split(' ');
+        const lastName = lastNameParts.join(' ');
+        
+        const userProfile = {
+          email: firebaseUser.email || '',
+          firstName: firstName || '',
+          lastName: lastName || '',
+          organization: 'Google User',
+          hospitalName: 'Google User',
+          role: 'user',
+          createdAt: new Date().toISOString(),
+          uid: firebaseUser.uid
+        };
+        
+        await setDoc(userDocRef, userProfile);
+      }
+      
+      return true;
+    } catch (error: any) {
+      console.error('Google sign-in error:', error);
+      if (error.code === 'auth/popup-closed-by-user') {
+        console.log('Popup was closed by user');
+      }
+      return false;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const signup = async (userData: any): Promise<boolean> => {
     setIsLoading(true);
     try {
@@ -176,6 +222,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     firebaseUser,
     isAuthenticated: !!user,
     login,
+    loginWithGoogle,
     logout,
     signup,
     isLoading

@@ -570,7 +570,7 @@ const Verify = () => {
         )}
 
         {/* Verification Result */}
-        {!isSearching && result && result.recordId ? (
+        {!isSearching && result && result.recordId && (
           <GlassCard className={`mb-8 ${result.status === 'verified' ? 'glow-border' : ''}`}>
             <div className="space-y-6">
               {/* Status Header */}
