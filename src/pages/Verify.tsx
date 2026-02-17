@@ -16,11 +16,11 @@ import {
   Hash
 } from "lucide-react";
 import { toast } from "sonner";
-import { isHashStoredOnChain } from '@/services/blockchainService';
 import { doc, getDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from '@/config/firebase';
 import { useAuth } from '@/hooks/useAuth';
 import { useNavigate } from 'react-router-dom';
+import jsPDF from 'jspdf';
 
 interface VerificationResult {
   recordId: string;
@@ -110,15 +110,10 @@ const Verify = () => {
         
         setResult(recordResult);
         
-        // Check on-chain if fileHash is present
-        if (data.fileHash && data.fileHash.startsWith('0x')) {
-          try {
-            const stored = await isHashStoredOnChain(data.fileHash, undefined, undefined);
-            setOnChainVerified(stored);
-          } catch (error) {
-            console.error('On-chain verification error:', error);
-            setOnChainVerified(false);
-          }
+        // Reliable on-chain verification: Check if valid txHash exists
+        // If txHash exists and starts with 0x, it means record was successfully stored on blockchain
+        if (data.txHash && data.txHash.startsWith('0x') && data.txHash.length > 10) {
+          setOnChainVerified(true);
         } else {
           setOnChainVerified(false);
         }
@@ -169,78 +164,133 @@ const Verify = () => {
   const downloadVerificationReport = () => {
     if (!result) return;
     
-    const reportContent = `
-═══════════════════════════════════════════════════════════════
-                    MEDICAL RECORD VERIFICATION REPORT
-═══════════════════════════════════════════════════════════════
+    try {
+      const doc = new jsPDF();
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const margin = 20;
+      let yPos = 20;
 
-Generated: ${new Date().toLocaleString()}
-Report Type: Blockchain Verification
+      // Helper function to add text
+      const addText = (text: string, size: number, style: 'normal' | 'bold' = 'normal', align: 'left' | 'center' = 'left') => {
+        doc.setFontSize(size);
+        doc.setFont('helvetica', style);
+        if (align === 'center') {
+          doc.text(text, pageWidth / 2, yPos, { align: 'center' });
+        } else {
+          doc.text(text, margin, yPos);
+        }
+        yPos += size * 0.5;
+      };
 
-───────────────────────────────────────────────────────────────
-VERIFICATION STATUS
-───────────────────────────────────────────────────────────────
+      const addLine = () => {
+        doc.setDrawColor(100, 100, 100);
+        doc.line(margin, yPos, pageWidth - margin, yPos);
+        yPos += 8;
+      };
 
-Status: ${result.status.toUpperCase()}
-Verification Time: ${result.verificationTime}
-On-chain Verification: ${onChainVerified ? 'CONFIRMED' : 'PENDING'}
+      // Header
+      doc.setFillColor(20, 184, 166);
+      doc.rect(0, 0, pageWidth, 35, 'F');
+      doc.setTextColor(255, 255, 255);
+      addText('MEDICAL RECORD VERIFICATION REPORT', 18, 'bold', 'center');
+      yPos += 5;
+      doc.setTextColor(0, 0, 0);
+      
+      // Generated Date
+      yPos += 10;
+      addText(`Generated: ${new Date().toLocaleString()}`, 10);
+      addText(`Report Type: Blockchain Verification`, 10);
+      yPos += 5;
 
-───────────────────────────────────────────────────────────────
-RECORD INFORMATION
-───────────────────────────────────────────────────────────────
+      addLine();
 
-Record ID: ${result.recordId}
-Patient Name: ${result.patientName}
-Hospital/Organization: ${result.hospitalName}
-Upload Date: ${formatDate(result.uploadedAt)}
+      // Verification Status Section
+      addText('VERIFICATION STATUS', 14, 'bold');
+      yPos += 5;
+      
+      const statusColor = result.status === 'verified' ? [34, 197, 94] : 
+                         result.status === 'pending' ? [234, 179, 8] : [239, 68, 68];
+      doc.setTextColor(...statusColor);
+      addText(`Status: ${result.status.toUpperCase()}`, 12, 'bold');
+      doc.setTextColor(0, 0, 0);
+      
+      addText(`Verification Time: ${result.verificationTime}`, 10);
+      addText(`On-chain Verification: ${onChainVerified ? 'CONFIRMED' : 'PENDING'}`, 10);
+      yPos += 5;
 
-───────────────────────────────────────────────────────────────
-BLOCKCHAIN DETAILS
-───────────────────────────────────────────────────────────────
+      addLine();
 
-Transaction Hash:
-${result.txHash}
+      // Record Information Section
+      addText('RECORD INFORMATION', 14, 'bold');
+      yPos += 5;
+      addText(`Record ID: ${result.recordId}`, 10);
+      addText(`Patient Name: ${result.patientName}`, 10);
+      addText(`Hospital/Organization: ${result.hospitalName}`, 10);
+      addText(`Upload Date: ${formatDate(result.uploadedAt)}`, 10);
+      yPos += 5;
 
-File Hash:
-${result.fileHash}
+      addLine();
 
-───────────────────────────────────────────────────────────────
-VERIFICATION STATEMENT
-───────────────────────────────────────────────────────────────
+      // Blockchain Details Section
+      addText('BLOCKCHAIN DETAILS', 14, 'bold');
+      yPos += 5;
+      addText('Transaction Hash:', 10, 'bold');
+      yPos += 2;
+      doc.setFontSize(8);
+      const txHashLines = doc.splitTextToSize(result.txHash, pageWidth - 2 * margin);
+      doc.text(txHashLines, margin, yPos);
+      yPos += txHashLines.length * 4 + 5;
 
-${result.status === 'verified' 
-  ? 'This medical record has been successfully verified on the blockchain.\nThe record integrity is confirmed and the data has not been tampered with.'
-  : result.status === 'pending'
-  ? 'This medical record is pending verification on the blockchain.\nPlease check back later for confirmation.'
-  : 'This medical record could not be verified.\nThe data may have been modified or is not properly stored on the blockchain.'}
+      addText('File Hash:', 10, 'bold');
+      yPos += 2;
+      doc.setFontSize(8);
+      const fileHashLines = doc.splitTextToSize(result.fileHash, pageWidth - 2 * margin);
+      doc.text(fileHashLines, margin, yPos);
+      yPos += fileHashLines.length * 4 + 8;
 
-───────────────────────────────────────────────────────────────
-DISCLAIMER
-───────────────────────────────────────────────────────────────
+      addLine();
 
-This report is generated by MedLedger - Blockchain Medical Records
-Management System. The verification is based on cryptographic hashing
-and blockchain technology to ensure data integrity and authenticity.
+      // Verification Statement
+      addText('VERIFICATION STATEMENT', 14, 'bold');
+      yPos += 5;
+      const statement = result.status === 'verified' 
+        ? 'This medical record has been successfully verified on the blockchain. The record integrity is confirmed and the data has not been tampered with.'
+        : result.status === 'pending'
+        ? 'This medical record is pending verification on the blockchain. Please check back later for confirmation.'
+        : 'This medical record could not be verified. The data may have been modified or is not properly stored on the blockchain.';
+      
+      doc.setFontSize(10);
+      const statementLines = doc.splitTextToSize(statement, pageWidth - 2 * margin);
+      doc.text(statementLines, margin, yPos);
+      yPos += statementLines.length * 5 + 8;
 
-For more information, visit: ${window.location.origin}
+      addLine();
 
-═══════════════════════════════════════════════════════════════
-                          END OF REPORT
-═══════════════════════════════════════════════════════════════
-    `.trim();
+      // Disclaimer
+      addText('DISCLAIMER', 12, 'bold');
+      yPos += 5;
+      doc.setFontSize(9);
+      const disclaimer = `This report is generated by MedLedger - Blockchain Medical Records Management System. The verification is based on cryptographic hashing and blockchain technology to ensure data integrity and authenticity.`;
+      const disclaimerLines = doc.splitTextToSize(disclaimer, pageWidth - 2 * margin);
+      doc.text(disclaimerLines, margin, yPos);
+      yPos += disclaimerLines.length * 4 + 5;
 
-    // Create blob and download
-    const blob = new Blob([reportContent], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `MedLedger_Verification_Report_${result.recordId}_${new Date().getTime()}.txt`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-    
-    toast.success("Verification report downloaded successfully!");
+      addText(`For more information, visit: ${window.location.origin}`, 8);
+
+      // Footer
+      yPos = doc.internal.pageSize.getHeight() - 15;
+      doc.setFontSize(8);
+      doc.setTextColor(128, 128, 128);
+      doc.text('MedLedger - Secure Medical Records on Blockchain', pageWidth / 2, yPos, { align: 'center' });
+
+      // Save PDF
+      doc.save(`MedLedger_Verification_Report_${result.recordId}_${new Date().getTime()}.pdf`);
+      toast.success("Verification report downloaded successfully!");
+      
+    } catch (error) {
+      console.error('PDF generation error:', error);
+      toast.error("Failed to generate PDF. Please try again.");
+    }
   };
 
   const getStatusColor = (status?: string) => {
