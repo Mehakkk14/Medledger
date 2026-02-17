@@ -73,10 +73,9 @@ const Dashboard: React.FC = () => {
       if (!user || !user.uid) return;
       
       try {
-        // Query Firestore for records belonging to this user
+        // Query Firestore for records in this hospital's subcollection
         const q = query(
-          collection(db, 'medicalRecords'),
-          where('hospitalUid', '==', user.uid)
+          collection(db, 'hospitals', user.uid, 'medicalRecords')
         );
         
         const querySnapshot = await getDocs(q);
@@ -122,7 +121,7 @@ const Dashboard: React.FC = () => {
   // Function to verify/reject pending records
   const handleAdminAction = async (recordId: string, action: 'verify' | 'reject') => {
     try {
-      const recordRef = doc(db, 'medicalRecords', recordId);
+      const recordRef = doc(db, 'hospitals', user.uid, 'medicalRecords', recordId);
       const newStatus = action === 'verify' ? 'verified' : 'invalid';
       
       await updateDoc(recordRef, {

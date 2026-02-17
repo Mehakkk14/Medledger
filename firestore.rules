@@ -17,9 +17,20 @@ service cloud.firestore {
       allow read: if isOwner(hospitalId);
       allow write: if isOwner(hospitalId);
       allow create: if isAuthenticated();
+      
+      // Medical Records subcollection under each hospital
+      match /medicalRecords/{recordId} {
+        // Anyone can read medical records (for public verification)
+        allow read: if true;
+        
+        // Only the hospital owner can write to their own records
+        allow create: if isOwner(hospitalId);
+        allow update: if isOwner(hospitalId);
+        allow delete: if isOwner(hospitalId);
+      }
     }
     
-    // Medical Records collection
+    // Legacy medical records collection (for backwards compatibility, if needed)
     match /medicalRecords/{recordId} {
       // Anyone can read medical records (for public verification)
       allow read: if true;

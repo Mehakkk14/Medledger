@@ -239,10 +239,9 @@ const Upload = () => {
         }))
       };
 
-      // Store in Firestore with composite key (hospitalUid_recordId)
-      // This allows each hospital to have their own record ID namespace
-      const firestoreDocId = `${user.uid}_${formData.recordId}`;
-      await setDoc(doc(db, 'medicalRecords', firestoreDocId), recordData);
+      // Store in Firestore as subcollection under hospital
+      // Structure: hospitals/{hospitalUid}/medicalRecords/{recordId}
+      await setDoc(doc(db, 'hospitals', user.uid, 'medicalRecords', formData.recordId), recordData);
 
       setTxHash(clientTxHash || '');
       setIsSuccess(true);

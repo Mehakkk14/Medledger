@@ -26,6 +26,8 @@ interface VerificationResult {
   recordId: string;
   status: "verified" | "invalid" | "pending";
   patientName: string;
+  patientContact?: string;
+  aadhaarNumber?: string;
   hospitalName: string;
   uploadedAt: string;
   txHash: string;
@@ -35,9 +37,10 @@ interface VerificationResult {
 
 const Verify = () => {
   const [searchId, setSearchId] = useState("");
-  const [searchType, setSearchType] = useState<"recordId" | "fileHash">("recordId");
+  const [searchType, setSearchType] = useState<"recordId" | "aadhaarNumber">("recordId");
   const [isSearching, setIsSearching] = useState(false);
   const [result, setResult] = useState<VerificationResult | null>(null);
+  const [results, setResults] = useState<VerificationResult[]>([]);
   const [onChainVerified, setOnChainVerified] = useState<boolean | null>(null);
   const [searchHistory, setSearchHistory] = useState<string[]>([]);
   const { user, isAuthenticated } = useAuth();
@@ -53,76 +56,103 @@ const Verify = () => {
 
   const handleSearch = async () => {
     if (!searchId.trim()) {
-      toast.error(`Please enter a ${searchType === 'recordId' ? 'Record ID' : 'File Hash'}`);
+      toast.error(`Please enter a ${searchType === 'recordId' ? 'Record ID' : 'Aadhaar Number'}`);
       return;
     }
 
     setIsSearching(true);
     
     try {
-      let recordSnap;
-      let data;
-
       if (searchType === 'recordId') {
-        // Search for record using composite key (hospitalUid_recordId)
-        const firestoreDocId = user ? `${user.uid}_${searchId}` : searchId;
-        const recordRef = doc(db, 'medicalRecords', firestoreDocId);
-        recordSnap = await getDoc(recordRef);
+        // Search for single record in hospital's subcollection
+        if (!user) {
+          toast.error("Please login to search records");
+          setIsSearching(false);
+          return;
+        }
+        const recordRef = doc(db, 'hospitals', user.uid, 'medicalRecords', searchId);
+        const recordSnap = await getDoc(recordRef);
         
         if (recordSnap.exists()) {
-          data = recordSnap.data();
+          const data = recordSnap.data();
+          setResults([]);
+
+          const recordResult: VerificationResult = {
+            recordId: data.recordId || searchId,
+            status: (data.status as "verified" | "invalid" | "pending") || "pending",
+            patientName: data.patientName || 'N/A',
+            patientContact: data.patientContact || '',
+            aadhaarNumber: data.aadhaarNumber || '',
+            hospitalName: data.hospitalName || 'N/A',
+            uploadedAt: data.uploadedAt || new Date().toISOString(),
+            txHash: data.txHash || '',
+            fileHash: data.fileHash || '',
+            verificationTime: "0.5s"
+          };
+          
+          setResult(recordResult);
+          
+          if (data.txHash && data.txHash.startsWith('0x') && data.txHash.length > 10) {
+            setOnChainVerified(true);
+          } else {
+            setOnChainVerified(false);
+          }
+          
+          toast.success("Record found!");
+        } else {
+          setResult(null);
+          setOnChainVerified(null);
+          setResults([]);
+          toast.error("Record not found");
         }
       } else {
-        // Search by file hash - query all records with this file hash for this hospital
+        // Search by Aadhaar Number - find ALL records for this patient
         if (!user) {
-          toast.error("Please login to search by file hash");
+          toast.error("Please login to search by Aadhaar");
           setIsSearching(false);
           return;
         }
         
         const q = query(
-          collection(db, 'medicalRecords'),
-          where('hospitalUid', '==', user.uid),
-          where('fileHash', '==', searchId.trim())
+          collection(db, 'hospitals', user.uid, 'medicalRecords'),
+          where('aadhaarNumber', '==', searchId.trim())
         );
         
         const querySnapshot = await getDocs(q);
         
         if (!querySnapshot.empty) {
-          // Take the first matching record
-          data = querySnapshot.docs[0].data();
-        }
-      }
-
-      if (data) {
-        const verificationTime = "0.5s";
-        
-        const recordResult: VerificationResult = {
-          recordId: data.recordId || searchId,
-          status: (data.status as "verified" | "invalid" | "pending") || "pending",
-          patientName: data.patientName || 'N/A',
-          hospitalName: data.hospitalName || 'N/A',
-          uploadedAt: data.uploadedAt || new Date().toISOString(),
-          txHash: data.txHash || '',
-          fileHash: data.fileHash || '',
-          verificationTime: verificationTime
-        };
-        
-        setResult(recordResult);
-        
-        // Reliable on-chain verification: Check if valid txHash exists
-        // If txHash exists and starts with 0x, it means record was successfully stored on blockchain
-        if (data.txHash && data.txHash.startsWith('0x') && data.txHash.length > 10) {
-          setOnChainVerified(true);
+          const allRecords: VerificationResult[] = [];
+          
+          querySnapshot.forEach((doc) => {
+            const data = doc.data();
+            allRecords.push({
+              recordId: data.recordId || doc.id,
+              status: (data.status as "verified" | "invalid" | "pending") || "pending",
+              patientName: data.patientName || 'N/A',
+              patientContact: data.patientContact || '',
+              aadhaarNumber: data.aadhaarNumber || '',
+              hospitalName: data.hospitalName || 'N/A',
+              uploadedAt: data.uploadedAt || new Date().toISOString(),
+              txHash: data.txHash || '',
+              fileHash: data.fileHash || '',
+              verificationTime: "0.5s"
+            });
+          });
+          
+          // Sort by upload date (newest first)
+          allRecords.sort((a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime());
+          
+          setResults(allRecords);
+          setResult(null);
+          setOnChainVerified(null);
+          
+          toast.success(`Found ${allRecords.length} record(s) for this patient`);
         } else {
-          setOnChainVerified(false);
+          setResult(null);
+          setResults([]);
+          setOnChainVerified(null);
+          toast.error("No records found for this Aadhaar number");
         }
-        
-        toast.success("Record found!");
-      } else {
-        setResult(null);
-        setOnChainVerified(null);
-        toast.error("Record not found");
       }
 
       // Add to search history
@@ -329,7 +359,7 @@ const Verify = () => {
             <div className="text-center">
               <h2 className="text-2xl font-semibold mb-2">Search Medical Records</h2>
               <p className="text-muted-foreground">
-                Search by Record ID or File Hash to verify authenticity
+                Search by Record ID or Aadhaar Number to verify authenticity
               </p>
             </div>
 
@@ -340,6 +370,7 @@ const Verify = () => {
                   setSearchType('recordId');
                   setSearchId('');
                   setResult(null);
+                  setResults([]);
                 }}
                 className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
                   searchType === 'recordId'
@@ -352,18 +383,19 @@ const Verify = () => {
               </button>
               <button
                 onClick={() => {
-                  setSearchType('fileHash');
+                  setSearchType('aadhaarNumber');
                   setSearchId('');
                   setResult(null);
+                  setResults([]);
                 }}
                 className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                  searchType === 'fileHash'
+                  searchType === 'aadhaarNumber'
                     ? 'bg-primary-neon text-background'
                     : 'glass text-muted-foreground hover:text-foreground'
                 }`}
               >
-                <Hash className="w-4 h-4 inline mr-2" />
-                File Hash
+                <User className="w-4 h-4 inline mr-2" />
+                Aadhaar Number
               </button>
             </div>
 
@@ -379,7 +411,7 @@ const Verify = () => {
                   placeholder={
                     searchType === 'recordId' 
                       ? "MR-2024-XXXXX" 
-                      : "0xc3d1cd6e772134..."
+                      : "Enter 12-digit Aadhaar Number"
                   }
                 />
               </div>
@@ -438,6 +470,100 @@ const Verify = () => {
                 <div className="text-sm text-muted-foreground">
                   Checking blockchain for record authenticity
                 </div>
+              </div>
+            </div>
+          </GlassCard>
+        )}
+
+        {/* Multiple Records View (Aadhaar Search) */}
+        {!isSearching && results.length > 0 && (
+          <GlassCard className="mb-8">
+            <div className="space-y-6">
+              <div className="text-center">
+                <h2 className="text-2xl font-bold mb-2">
+                  Patient Medical History
+                </h2>
+                <p className="text-muted-foreground">
+                  Found <span className="text-primary-neon font-semibold">{results.length}</span> record(s) for this patient
+                </p>
+              </div>
+
+              {/* Patient Info Summary */}
+              {results[0] && (
+                <div className="glass p-4 rounded-lg">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div>
+                      <div className="text-sm text-muted-foreground">Patient Name</div>
+                      <div className="font-semibold">{results[0].patientName}</div>
+                    </div>
+                    <div>
+                      <div className="text-sm text-muted-foreground">Aadhaar Number</div>
+                      <div className="font-mono">{results[0].aadhaarNumber}</div>
+                    </div>
+                    <div>
+                      <div className="text-sm text-muted-foreground">Hospital</div>
+                      <div className="font-semibold">{results[0].hospitalName}</div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Records Table */}
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b border-border/30">
+                      <th className="text-left p-3 text-sm font-medium text-muted-foreground">Record ID</th>
+                      <th className="text-left p-3 text-sm font-medium text-muted-foreground">Date</th>
+                      <th className="text-left p-3 text-sm font-medium text-muted-foreground">Status</th>
+                      <th className="text-left p-3 text-sm font-medium text-muted-foreground">Blockchain</th>
+                      <th className="text-center p-3 text-sm font-medium text-muted-foreground">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {results.map((record, index) => (
+                      <tr key={index} className="border-b border-border/10 hover:bg-accent/20 transition-colors">
+                        <td className="p-3">
+                          <div className="font-mono text-sm">{record.recordId}</div>
+                        </td>
+                        <td className="p-3">
+                          <div className="text-sm">{formatDate(record.uploadedAt)}</div>
+                        </td>
+                        <td className="p-3">
+                          <StatusBadge status={record.status}>
+                            {record.status.charAt(0).toUpperCase() + record.status.slice(1)}
+                          </StatusBadge>
+                        </td>
+                        <td className="p-3">
+                          {record.txHash && record.txHash.startsWith('0x') && record.txHash.length > 10 ? (
+                            <span className="text-success text-sm flex items-center">
+                              <CheckCircle className="w-4 h-4 mr-1" />
+                              Verified
+                            </span>
+                          ) : (
+                            <span className="text-warning text-sm flex items-center">
+                              <Clock className="w-4 h-4 mr-1" />
+                              Pending
+                            </span>
+                          )}
+                        </td>
+                        <td className="p-3 text-center">
+                          <button
+                            onClick={() => {
+                              setSearchType('recordId');
+                              setSearchId(record.recordId);
+                              setResults([]);
+                              handleSearch();
+                            }}
+                            className="text-primary-neon hover:text-primary text-sm underline"
+                          >
+                            View Details
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             </div>
           </GlassCard>
@@ -592,12 +718,14 @@ const Verify = () => {
             </div>
           </GlassCard>
         ) : (
-          !isSearching && (
+          !isSearching && !result && results.length === 0 && searchHistory.length > 0 && (
             <GlassCard className="mb-8">
               <div className="text-center py-8">
                 <XCircle className="w-8 h-8 text-danger mx-auto mb-2" />
                 <h2 className="text-2xl font-bold mb-2 text-danger">No record found</h2>
-                <p className="text-muted-foreground">Please check the Record ID and try again.</p>
+                <p className="text-muted-foreground">
+                  Please check the {searchType === 'recordId' ? 'Record ID' : 'Aadhaar Number'} and try again.
+                </p>
               </div>
             </GlassCard>
           )
