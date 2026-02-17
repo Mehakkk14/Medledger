@@ -717,18 +717,6 @@ const Verify = () => {
               </div>
             </div>
           </GlassCard>
-        ) : (
-          !isSearching && !result && results.length === 0 && searchHistory.length > 0 && (
-            <GlassCard className="mb-8">
-              <div className="text-center py-8">
-                <XCircle className="w-8 h-8 text-danger mx-auto mb-2" />
-                <h2 className="text-2xl font-bold mb-2 text-danger">No record found</h2>
-                <p className="text-muted-foreground">
-                  Please check the {searchType === 'recordId' ? 'Record ID' : 'Aadhaar Number'} and try again.
-                </p>
-              </div>
-            </GlassCard>
-          )
         )}
 
         {/* How Verification Works */}
